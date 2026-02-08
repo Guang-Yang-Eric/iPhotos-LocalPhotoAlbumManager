@@ -6,7 +6,7 @@ import json
 import os
 import subprocess
 from pathlib import Path
-from typing import Any, Dict, Optional, Sequence, TYPE_CHECKING
+from typing import Any, Dict, Iterator, Optional, Sequence, TYPE_CHECKING
 
 from ..errors import ExternalToolError
 
@@ -415,7 +415,7 @@ def qimage_to_numpy(image) -> "np.ndarray":
 
 def encode_video_from_frames(
     output_path: Path,
-    frame_generator,
+    frame_generator: "Iterator",
     fps: float,
     audio_source: Optional[Path] = None,
     codec: str = "libx264",
