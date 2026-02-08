@@ -373,3 +373,118 @@ def probe_media(source: Path) -> Dict[str, Any]:
         return json.loads(process.stdout.decode("utf-8"))
     except json.JSONDecodeError as exc:
         raise ExternalToolError("ffprobe returned invalid JSON output") from exc
+
+
+# ------------------------------------------------------------------
+# Video colour-grading export helpers
+# ------------------------------------------------------------------
+
+def qimage_to_numpy(image) -> "np.ndarray":
+    """Convert a ``QImage`` (Format_RGB888 or RGBA8888) to a NumPy array.
+
+    Returns an ``(H, W, 3)`` ``uint8`` array in RGB order.  Alpha channels are
+    silently dropped.
+    """
+    import numpy as np
+    from PySide6.QtGui import QImage as _QImage
+
+    fmt = image.format()
+    if fmt == _QImage.Format.Format_RGBA8888:
+        channels = 4
+    elif fmt == _QImage.Format.Format_RGB888:
+        channels = 3
+    else:
+        image = image.convertToFormat(_QImage.Format.Format_RGB888)
+        channels = 3
+
+    w, h = image.width(), image.height()
+    ptr = image.constBits()
+    byte_count = image.sizeInBytes()
+    if hasattr(ptr, "setsize"):
+        ptr.setsize(byte_count)
+
+    arr = np.frombuffer(ptr, dtype=np.uint8).reshape((h, image.bytesPerLine()))
+    # Trim padding bytes if bytesPerLine > w * channels
+    arr = arr[:, : w * channels].reshape((h, w, channels))
+
+    if channels == 4:
+        arr = arr[:, :, :3]  # Drop alpha → RGB
+
+    return arr.copy()
+
+
+def encode_video_from_frames(
+    output_path: Path,
+    frame_generator,
+    fps: float,
+    audio_source: Optional[Path] = None,
+    codec: str = "libx264",
+    quality: int = 23,
+    pixel_format: str = "yuv420p",
+) -> None:
+    """Encode colour-graded frames into a video file.
+
+    Parameters
+    ----------
+    output_path:
+        Destination file path (e.g. ``.mp4``, ``.mov``).
+    frame_generator:
+        An iterable yielding ``QImage`` objects (one per frame).
+    fps:
+        Output frame rate.
+    audio_source:
+        Optional path to the original video whose audio stream will be
+        copied verbatim (no re-encoding).
+    codec:
+        Video codec name accepted by PyAV/FFmpeg.
+    quality:
+        CRF value (lower = better quality).
+    pixel_format:
+        Pixel format for the output stream.
+    """
+    if av is None:
+        raise ExternalToolError("PyAV is required for video export but is not installed.")
+
+    import numpy as np
+
+    output = av.open(str(output_path), mode="w")
+    video_stream = output.add_stream(codec, rate=fps)
+    video_stream.options = {"crf": str(quality)}
+    video_stream.pix_fmt = pixel_format
+
+    audio_input = None
+    audio_in_stream = None
+    audio_out_stream = None
+
+    if audio_source is not None:
+        try:
+            audio_input = av.open(str(audio_source), mode="r")
+            if audio_input.streams.audio:
+                audio_in_stream = audio_input.streams.audio[0]
+                audio_out_stream = output.add_stream(template=audio_in_stream)
+        except Exception:
+            audio_input = None
+
+    for frame_image in frame_generator:
+        arr = qimage_to_numpy(frame_image)
+        if video_stream.width == 0:
+            video_stream.width = arr.shape[1]
+            video_stream.height = arr.shape[0]
+
+        frame = av.VideoFrame.from_ndarray(arr, format="rgb24")
+        for packet in video_stream.encode(frame):
+            output.mux(packet)
+
+    # Flush encoder
+    for packet in video_stream.encode():
+        output.mux(packet)
+
+    # Copy audio stream
+    if audio_input is not None and audio_in_stream is not None:
+        for packet in audio_input.demux(audio_in_stream):
+            if packet.dts is not None:
+                packet.stream = audio_out_stream
+                output.mux(packet)
+        audio_input.close()
+
+    output.close()

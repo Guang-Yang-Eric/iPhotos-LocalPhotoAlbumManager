@@ -513,3 +513,22 @@ class VideoArea(QWidget):
         """Return ``True`` when the playback controls are currently enabled."""
 
         return self._controls_enabled
+
+    # ------------------------------------------------------------------
+    # Video editing helpers
+    # ------------------------------------------------------------------
+    def set_video_output_sink(self, sink) -> None:
+        """Redirect player output to an external ``QVideoSink``.
+
+        When *sink* is ``None`` the player reverts to the built-in
+        ``QGraphicsVideoItem`` for direct ungraded playback.
+        """
+        if sink is None:
+            self._player.setVideoOutput(self._video_item)
+        else:
+            self._player.setVideoOutput(sink)
+
+    @property
+    def media_player(self) -> QMediaPlayer:
+        """Expose the underlying ``QMediaPlayer`` for coordinator wiring."""
+        return self._player

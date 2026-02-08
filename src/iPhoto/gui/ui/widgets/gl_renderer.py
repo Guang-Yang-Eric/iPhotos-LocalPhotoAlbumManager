@@ -279,6 +279,54 @@ class GLRenderer:
 
         return self._texture_id, self._texture_width, self._texture_height
 
+    def upload_texture_incremental(self, image: QImage) -> bool:
+        """Upload *image* using an incremental update when possible.
+
+        If the incoming image dimensions match the current texture, only the
+        pixel data is replaced via ``glTexSubImage2D`` – avoiding the cost of
+        destroying and re-creating the GPU texture object.
+
+        Returns ``True`` when an incremental (fast-path) update was used, or
+        ``False`` when a full texture rebuild was necessary.
+        """
+        w, h = image.width(), image.height()
+
+        if (
+            self._texture_id
+            and (w, h) == (self._texture_width, self._texture_height)
+        ):
+            # Fast path: same size – overwrite pixel data in-place.
+            qimage = image.convertToFormat(QImage.Format.Format_RGBA8888)
+            buffer = qimage.constBits()
+            byte_count = qimage.sizeInBytes()
+            if hasattr(buffer, "setsize"):
+                buffer.setsize(byte_count)
+            else:
+                buffer = buffer[:byte_count]
+
+            gl.glBindTexture(gl.GL_TEXTURE_2D, self._texture_id)
+            gl.glPixelStorei(gl.GL_UNPACK_ALIGNMENT, 1)
+            row_length = qimage.bytesPerLine() // 4
+            gl.glPixelStorei(gl.GL_UNPACK_ROW_LENGTH, row_length)
+            gl.glTexSubImage2D(
+                gl.GL_TEXTURE_2D,
+                0,
+                0,
+                0,
+                w,
+                h,
+                gl.GL_RGBA,
+                gl.GL_UNSIGNED_BYTE,
+                buffer,
+            )
+            gl.glPixelStorei(gl.GL_UNPACK_ROW_LENGTH, 0)
+            gl.glPixelStorei(gl.GL_UNPACK_ALIGNMENT, 4)
+            return True
+
+        # Size changed or no texture yet – full rebuild.
+        self.upload_texture(image)
+        return False
+
     def delete_texture(self) -> None:
         """Delete the currently bound texture, if any."""
 

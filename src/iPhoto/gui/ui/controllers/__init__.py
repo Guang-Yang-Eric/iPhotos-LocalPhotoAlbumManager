@@ -10,6 +10,9 @@ from .preview_controller import PreviewController
 from .selection_controller import SelectionController
 from .share_controller import ShareController
 from .status_bar_controller import StatusBarController
+from .video_frame_processor import VideoFrameProcessor
+from .video_edit_coordinator import VideoEditCoordinator
+from .live_photo_edit_controller import LivePhotoEditController
 
 __all__ = [
     "ContextMenuController",
@@ -22,4 +25,7 @@ __all__ = [
     "SelectionController",
     "ShareController",
     "StatusBarController",
+    "VideoFrameProcessor",
+    "VideoEditCoordinator",
+    "LivePhotoEditController",
 ]
