@@ -47,10 +47,10 @@ class TestTextureSizeFix:
 
     def test_no_texture_size_reference_in_paint_gl(self):
         """The paintGL method should not reference _texture_size."""
-        widget_path = Path(
-            "/home/runner/work/iPhotos-LocalPhotoAlbumManager/"
-            "iPhotos-LocalPhotoAlbumManager/src/iPhoto/gui/ui/widgets/"
-            "gl_image_viewer/widget.py"
+        widget_path = (
+            Path(__file__).resolve().parent.parent
+            / "src" / "iPhoto" / "gui" / "ui" / "widgets"
+            / "gl_image_viewer" / "widget.py"
         )
         content = widget_path.read_text(encoding="utf-8")
         # _texture_size() should NOT appear in the file (it was a typo)
@@ -61,10 +61,10 @@ class TestTextureSizeFix:
 
     def test_texture_dimensions_method_exists(self):
         """GLImageViewer should have a _texture_dimensions method."""
-        widget_path = Path(
-            "/home/runner/work/iPhotos-LocalPhotoAlbumManager/"
-            "iPhotos-LocalPhotoAlbumManager/src/iPhoto/gui/ui/widgets/"
-            "gl_image_viewer/widget.py"
+        widget_path = (
+            Path(__file__).resolve().parent.parent
+            / "src" / "iPhoto" / "gui" / "ui" / "widgets"
+            / "gl_image_viewer" / "widget.py"
         )
         content = widget_path.read_text(encoding="utf-8")
         assert "def _texture_dimensions(" in content

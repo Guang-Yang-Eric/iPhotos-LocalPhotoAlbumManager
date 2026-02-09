@@ -316,6 +316,7 @@ class ContextMenuController(QObject):
             return
 
         exported = 0
+        errors = 0
         for raw_path in raw_paths:
             adjustments = sidecar.load_adjustments(raw_path)
             if not adjustments:
@@ -323,11 +324,16 @@ class ContextMenuController(QObject):
             try:
                 export_xmp(raw_path, adjustments)
                 exported += 1
-            except Exception:
-                pass
+            except OSError:
+                errors += 1
 
         if exported > 0:
             self._toast.show_toast(f"Exported {exported} XMP file(s)")
+        elif errors > 0:
+            self._status_bar.show_message(
+                f"Failed to write {errors} XMP file(s).",
+                3000,
+            )
         else:
             self._status_bar.show_message(
                 "No sidecar data found for the selected RAW files.",
