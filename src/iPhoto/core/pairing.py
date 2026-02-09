@@ -10,6 +10,7 @@ from typing import Dict, Iterable, List, Tuple
 from dateutil import parser
 
 from ..config import LIVE_DURATION_PREFERRED, PAIR_TIME_DELTA_SEC
+from ..media_classifier import RAW_EXTENSIONS
 from ..models.types import LiveGroup
 
 
@@ -21,8 +22,6 @@ def _parse_dt(value: str | None) -> datetime | None:
     except (ValueError, TypeError):
         return None
 
-
-from ..media_classifier import RAW_EXTENSIONS
 
 _IMAGE_EXTENSIONS = {
     ".jpg",

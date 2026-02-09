@@ -498,7 +498,10 @@ def read_image_meta_with_exiftool(
                     "continuing with partial metadata",
                     path,
                 )
-        except Exception:
+        except Exception:  # noqa: BLE001 - Pillow can raise a variety of errors
+            # The Pillow fallback is a best-effort enrichment step.  If it fails
+            # for any reason the metadata collected from ExifTool is still usable,
+            # so we log the error and continue rather than discarding the file.
             LOGGER.debug("Unexpected error opening %s with Pillow", path, exc_info=True)
 
     if info["dt"] is None and exif_payload:
