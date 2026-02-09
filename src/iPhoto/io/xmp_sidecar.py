@@ -79,6 +79,14 @@ _WB_TEMP_CENTER = 5500.0
 _WB_TEMP_RANGE = 4500.0
 _WB_TINT_FACTOR = 150.0
 
+# Curve channel mapping: (ipo_key, crs_tag_local_name)
+_CURVE_CHANNEL_MAP: List[Tuple[str, str]] = [
+    ("Curve_RGB", "ToneCurvePV2012"),
+    ("Curve_Red", "ToneCurvePV2012Red"),
+    ("Curve_Green", "ToneCurvePV2012Green"),
+    ("Curve_Blue", "ToneCurvePV2012Blue"),
+]
+
 
 # ---------------------------------------------------------------------------
 # LUT encoding helpers
@@ -279,12 +287,6 @@ def ipo_to_xmp(adjustments: Dict[str, Any]) -> str:
     # recognise the curves natively.
     curve_enabled = bool(adjustments.get("Curve_Enabled", False))
     if curve_enabled:
-        _CURVE_CHANNEL_MAP = [
-            ("Curve_RGB", "ToneCurvePV2012"),
-            ("Curve_Red", "ToneCurvePV2012Red"),
-            ("Curve_Green", "ToneCurvePV2012Green"),
-            ("Curve_Blue", "ToneCurvePV2012Blue"),
-        ]
         for ipo_key, crs_tag in _CURVE_CHANNEL_MAP:
             raw = adjustments.get(ipo_key)
             if raw and isinstance(raw, list):
@@ -441,14 +443,8 @@ def xmp_to_ipo(xmp_content: str) -> Dict[str, Any]:
             result["BakedLUT_Enabled"] = True
 
     # Adobe-compatible tone curves (fallback when no baked LUT)
-    _CURVE_READ_MAP = [
-        ("ToneCurvePV2012", "Curve_RGB"),
-        ("ToneCurvePV2012Red", "Curve_Red"),
-        ("ToneCurvePV2012Green", "Curve_Green"),
-        ("ToneCurvePV2012Blue", "Curve_Blue"),
-    ]
     curve_found = False
-    for crs_tag, ipo_key in _CURVE_READ_MAP:
+    for ipo_key, crs_tag in _CURVE_CHANNEL_MAP:
         pts = _read_tone_curve_seq(desc, crs_tag)
         if pts is not None:
             result[ipo_key] = pts
