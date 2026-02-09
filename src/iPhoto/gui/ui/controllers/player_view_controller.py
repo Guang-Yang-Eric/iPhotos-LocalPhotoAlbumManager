@@ -72,7 +72,6 @@ class _AdjustedImageWorker(QRunnable):
             return
 
         # Pass the raw image and adjustments to the main thread. The GL viewer
-        # Pass the raw image and adjustments to the main thread. The GL viewer
         # will apply the adjustments on the GPU.
         self._signals.completed.emit(self._source, image, adjustments or {})
 

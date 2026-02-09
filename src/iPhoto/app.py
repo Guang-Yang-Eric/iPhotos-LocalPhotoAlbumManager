@@ -498,7 +498,8 @@ def scan_specific_files(
     video_paths: List[Path] = []
 
     # Minimal set of extensions matching scanner.py
-    _IMAGE_EXTENSIONS = {".heic", ".heif", ".heifs", ".heicf", ".jpg", ".jpeg", ".png"}
+    from .media_classifier import RAW_EXTENSIONS
+    _IMAGE_EXTENSIONS = {".heic", ".heif", ".heifs", ".heicf", ".jpg", ".jpeg", ".png"} | RAW_EXTENSIONS
     _VIDEO_EXTENSIONS = {".mov", ".mp4", ".m4v", ".qt"}
 
     for f in files:

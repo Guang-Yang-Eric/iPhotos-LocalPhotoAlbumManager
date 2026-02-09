@@ -10,7 +10,8 @@ import logging
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QImage, QImageReader, QPixmap
 
-from .deps import load_pillow
+from .deps import load_pillow, load_rawpy
+from ..media_classifier import RAW_EXTENSIONS
 
 _PILLOW = load_pillow()
 if _PILLOW is not None:  # pragma: no branch - import guard
@@ -30,12 +31,110 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 
+def _is_raw_file(source: Path) -> bool:
+    """Return ``True`` when *source* has a known camera-RAW extension."""
+    return source.suffix.lower() in RAW_EXTENSIONS
+
+
+def _load_raw_with_rawpy(
+    source: Path, target: QSize | None = None
+) -> Optional[QImage]:
+    """Decode a camera-RAW file via :mod:`rawpy` and return a :class:`QImage`.
+
+    ``rawpy`` wraps LibRaw which provides full-resolution demosaicked output for
+    every major RAW format.  When a *target* size is supplied the decoded frame
+    is optionally downscaled to save memory, but the aspect ratio is always
+    preserved so the playback viewer never displays black borders or stretched
+    pixels.
+    """
+    rp_support = load_rawpy()
+    if rp_support is None:
+        _LOGGER.debug("rawpy not available, cannot decode %s", source.name)
+        return None
+
+    rawpy = rp_support.rawpy
+    try:
+        with rawpy.imread(str(source)) as raw:
+            raw_sizes = raw.sizes
+            _LOGGER.debug(
+                "sensor=%s: raw_width=%d, raw_height=%d, width=%d, height=%d, "
+                "iwidth=%d, iheight=%d",
+                source.name, raw_sizes.raw_width, raw_sizes.raw_height,
+                raw_sizes.width, raw_sizes.height,
+                raw_sizes.iwidth, raw_sizes.iheight,
+            )
+            # ``postprocess`` demosaics + white-balances the sensor data and
+            # returns an ``(H, W, 3)`` uint8 RGB array at full sensor resolution.
+            rgb = raw.postprocess(use_camera_wb=True, no_auto_bright=False)
+    except Exception:
+        _LOGGER.debug("rawpy failed to decode %s", source, exc_info=True)
+        return None
+
+    h, w, channels = rgb.shape
+    _LOGGER.debug("postprocess output: %dx%d channels=%d", w, h, channels)
+    if channels < 3 or h == 0 or w == 0:
+        _LOGGER.debug("invalid postprocess output for %s, returning None", source.name)
+        return None
+
+    # Build a QImage from the raw RGB buffer.  The data must remain alive
+    # while the QImage references it, so we call ``.copy()`` immediately.
+    bytes_per_line = w * 3
+    image = QImage(rgb.data, w, h, bytes_per_line, QImage.Format.Format_RGB888).copy()
+    _LOGGER.debug(
+        "QImage created: %dx%d format=%s isNull=%s",
+        image.width(), image.height(), image.format(), image.isNull(),
+    )
+
+    if target is not None and target.isValid() and not target.isEmpty():
+        src_size = image.size()
+        scaled_target = src_size.scaled(target, Qt.AspectRatioMode.KeepAspectRatio)
+        _LOGGER.debug(
+            "target=%dx%d, scaled_target=%dx%d",
+            target.width(), target.height(),
+            scaled_target.width(), scaled_target.height(),
+        )
+        if (
+            scaled_target.width() < src_size.width()
+            or scaled_target.height() < src_size.height()
+        ):
+            image = image.scaled(
+                scaled_target,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            _LOGGER.debug("downscaled to %dx%d", image.width(), image.height())
+        else:
+            _LOGGER.debug("no downscale needed (src <= target)")
+    else:
+        _LOGGER.debug("target=None, full-resolution decode, no scaling")
+
+    _LOGGER.debug(
+        "FINAL image: %dx%d depth=%d bytesPerLine=%d",
+        image.width(), image.height(), image.depth(), image.bytesPerLine(),
+    )
+    return image
+
+
 def load_qimage(source: Path, target: QSize | None = None) -> Optional[QImage]:
     """Return a :class:`QImage` for *source* with optional scaling."""
 
     if not source.exists():
         _LOGGER.debug("Skipping image load for missing path: %s", source)
         return None
+
+    # RAW camera files need a dedicated decoder.  ``rawpy`` (backed by
+    # LibRaw) provides full-resolution demosaicked frames that neither Qt's
+    # built-in readers nor Pillow can deliver.
+    if _is_raw_file(source):
+        raw_image = _load_raw_with_rawpy(source, target)
+        if raw_image is not None:
+            return raw_image
+        # Fall through to the standard pipeline so embedded previews are
+        # still available when rawpy is missing.
+        _LOGGER.debug(
+            "rawpy returned None for %s, falling through to Qt/Pillow",
+            source.name,
+        )
 
     # ``QImageReader`` is most efficient when it can stream directly from the
     # filename because many formats (JPEG, HEIC, etc.) expose fast-paths for
@@ -157,12 +256,17 @@ def generate_micro_thumbnail(source: Path) -> Optional[bytes]:
 
     This function loads the image using Pillow, scales it down maintaining aspect ratio
     such that the longest side is 16 pixels, and encodes it as a JPEG.
+    For RAW camera files, ``rawpy`` is used as the primary decoder.
     """
     if _Image is None or _ImageOps is None:
         return None
 
     if not source.exists():
         return None
+
+    # RAW files: decode via rawpy first, then resize with Pillow
+    if _is_raw_file(source):
+        return _generate_raw_micro_thumbnail(source)
 
     try:
         with _Image.open(source) as img:  # type: ignore[attr-defined]
@@ -202,4 +306,35 @@ def generate_micro_thumbnail(source: Path) -> Optional[bytes]:
             return output.getvalue()
     except Exception:
         _LOGGER.debug("Failed to generate micro thumbnail for %s", source, exc_info=True)
+        return None
+
+
+def _generate_raw_micro_thumbnail(source: Path) -> Optional[bytes]:
+    """Generate a 16×16 JPEG thumbnail from a RAW file via ``rawpy``."""
+
+    rp_support = load_rawpy()
+    if rp_support is None or _Image is None:
+        return None
+
+    rawpy = rp_support.rawpy
+    try:
+        with rawpy.imread(str(source)) as raw:
+            # Use half_size=True to decode at half sensor resolution — much
+            # faster than full demosaic and more than adequate for a 16px
+            # thumbnail.
+            rgb = raw.postprocess(use_camera_wb=True, half_size=True, no_auto_bright=False)
+    except Exception:
+        _LOGGER.debug("rawpy micro-thumbnail failed for %s", source, exc_info=True)
+        return None
+
+    try:
+        img = _Image.fromarray(rgb)
+        img.thumbnail((16, 16), _Image.Resampling.BICUBIC if hasattr(_Image, "Resampling") else _Image.BICUBIC)
+        if img.mode != "RGB":
+            img = img.convert("RGB")
+        output = BytesIO()
+        img.save(output, format="JPEG", quality=75)
+        return output.getvalue()
+    except Exception:
+        _LOGGER.debug("Failed to encode RAW micro thumbnail for %s", source, exc_info=True)
         return None

@@ -10,6 +10,7 @@ from typing import Dict, Iterable, List, Tuple
 from dateutil import parser
 
 from ..config import LIVE_DURATION_PREFERRED, PAIR_TIME_DELTA_SEC
+from ..media_classifier import RAW_EXTENSIONS
 from ..models.types import LiveGroup
 
 
@@ -30,7 +31,7 @@ _IMAGE_EXTENSIONS = {
     ".heif",
     ".heifs",
     ".heicf",
-}
+} | RAW_EXTENSIONS
 
 def _is_photo(row: Dict[str, object]) -> bool:
     mime = row.get("mime")

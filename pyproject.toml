@@ -26,6 +26,7 @@ dependencies = [
   "numba>=0.60",
   "mapbox-vector-tile>=1.2",
   "av>=11.0.0",
+  "rawpy>=0.23",
 ]
 
 [project.optional-dependencies]

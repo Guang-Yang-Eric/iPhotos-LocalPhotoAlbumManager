@@ -84,6 +84,7 @@ class NavigationCoordinator(QObject):
         self._sidebar.allPhotosSelected.connect(self.open_all_photos)
         self._sidebar.staticNodeSelected.connect(self._handle_static_node)
         self._sidebar.bindLibraryRequested.connect(self._handle_bind_library)
+        self._sidebar.filesDropped.connect(self._handle_files_dropped)
 
         # Watcher integration
         self._context.library.treeUpdated.connect(self.handle_tree_updated)
@@ -120,6 +121,13 @@ class NavigationCoordinator(QObject):
         query = AssetQuery(album_path=self._album_path_for_query(album.root if album else path))
         query.include_subalbums = True  # Ensure recursive view by default
         self._asset_vm.load_query(query)
+
+    def _handle_files_dropped(self, target: Path, paths: list) -> None:
+        """Import files dropped onto the sidebar into the target album."""
+
+        if not paths:
+            return
+        self._facade.import_files(paths, destination=target)
 
     def open_all_photos(self):
         """Loads all photos."""

@@ -22,6 +22,7 @@ from PySide6.QtGui import QGuiApplication, QPalette
 from PySide6.QtWidgets import QMenu
 
 from ...facade import AppFacade
+from ....media_classifier import RAW_EXTENSIONS
 from ..models.roles import Roles
 from ..widgets.asset_grid import AssetGrid
 from ..widgets.notification_toast import NotificationToast
@@ -146,6 +147,16 @@ class ContextMenuController(QObject):
             copy_action.triggered.connect(self._copy_selection_to_clipboard)
             reveal_action.triggered.connect(self._reveal_selection_in_file_manager)
             export_action.triggered.connect(self._export_callback)
+
+            # Conditionally show "Export XMP" for RAW files that have sidecar data
+            selected_paths = self._selected_asset_paths()
+            raw_paths = [p for p in selected_paths if p.suffix.lower() in RAW_EXTENSIONS]
+            if raw_paths:
+                export_xmp_action = menu.addAction(
+                    QCoreApplication.translate("MainWindow", "Export XMP")
+                )
+                export_xmp_action.triggered.connect(self._export_xmp_for_selection)
+
             is_recently_deleted = (
                 self._navigation.is_recently_deleted_view()
                 if self._navigation is not None
@@ -288,6 +299,48 @@ class ContextMenuController(QObject):
             f"Revealed {path.name} in file manager.",
             3000,
         )
+
+    def _export_xmp_for_selection(self) -> None:
+        """Export XMP sidecar files for selected RAW assets.
+
+        For each selected RAW file that has an ``.ipo`` sidecar, the function
+        writes an equivalent ``.xmp`` file next to the original RAW file.
+        """
+        from ....io import sidecar
+        from ....io.xmp_sidecar import export_xmp
+
+        paths = self._selected_asset_paths()
+        raw_paths = [p for p in paths if p.suffix.lower() in RAW_EXTENSIONS]
+        if not raw_paths:
+            self._status_bar.show_message("No RAW files selected.", 3000)
+            return
+
+        exported = 0
+        errors = 0
+        for raw_path in raw_paths:
+            adjustments = sidecar.load_adjustments(raw_path)
+            if not adjustments:
+                continue
+            try:
+                export_xmp(raw_path, adjustments)
+                exported += 1
+            except OSError:
+                errors += 1
+
+        if exported > 0 and errors > 0:
+            self._toast.show_toast(f"Exported {exported} XMP file(s), {errors} failed")
+        elif exported > 0:
+            self._toast.show_toast(f"Exported {exported} XMP file(s)")
+        elif errors > 0:
+            self._status_bar.show_message(
+                f"Failed to write {errors} XMP file(s).",
+                3000,
+            )
+        else:
+            self._status_bar.show_message(
+                "No sidecar data found for the selected RAW files.",
+                3000,
+            )
 
     def _paste_from_clipboard(self) -> None:
         """Import files referenced in the clipboard into the currently opened album."""

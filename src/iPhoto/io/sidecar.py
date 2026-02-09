@@ -466,6 +466,11 @@ def sidecar_path_for_asset(asset_path: Path) -> Path:
 def load_adjustments(asset_path: Path) -> Dict[str, Any]:
     """Return light adjustments stored alongside *asset_path*.
 
+    The function checks for sidecars in the following priority order:
+
+    1. **``.ipo``** – the native iPhoto sidecar format (always preferred).
+    2. **``.xmp``** – Adobe XMP sidecar (fallback when ``.ipo`` is absent).
+
     Missing files or parsing errors are treated as an empty adjustment set so the
     caller can continue working with the unmodified image.  Individual entries
     that fail to parse fall back to ``0.0`` rather than aborting the load, which
@@ -474,7 +479,9 @@ def load_adjustments(asset_path: Path) -> Dict[str, Any]:
 
     sidecar_path = sidecar_path_for_asset(asset_path)
     if not sidecar_path.exists():
-        return {}
+        # Fallback: try .xmp sidecar
+        from .xmp_sidecar import load_xmp_adjustments
+        return load_xmp_adjustments(asset_path)
 
     try:
         tree = ET.parse(sidecar_path)

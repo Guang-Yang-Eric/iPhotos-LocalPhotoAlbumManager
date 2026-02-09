@@ -10,11 +10,12 @@ from src.iPhoto.utils.exiftool import get_metadata_batch
 from src.iPhoto.io.metadata import read_image_meta_with_exiftool, read_video_meta
 from src.iPhoto.utils.hashutils import compute_file_id
 from src.iPhoto.domain.models import MediaType
+from src.iPhoto.media_classifier import RAW_EXTENSIONS
 
 logger = logging.getLogger(__name__)
 
 class ExifToolMetadataProvider(IMetadataProvider):
-    _IMAGE_EXTENSIONS = {".heic", ".heif", ".heifs", ".heicf", ".jpg", ".jpeg", ".png", ".webp"}
+    _IMAGE_EXTENSIONS = {".heic", ".heif", ".heifs", ".heicf", ".jpg", ".jpeg", ".png", ".webp"} | RAW_EXTENSIONS
     _VIDEO_EXTENSIONS = {".mov", ".mp4", ".m4v", ".qt", ".avi", ".mkv"}
 
     def get_metadata_batch(self, paths: List[Path]) -> List[Dict[str, Any]]:

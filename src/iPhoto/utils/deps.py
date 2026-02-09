@@ -65,6 +65,24 @@ def load_pillow() -> Optional[PillowSupport]:
 
 
 @dataclass(frozen=True)
+class RawpySupport:
+    """Container exposing rawpy when the library is available."""
+
+    rawpy: Any
+
+
+@lru_cache(maxsize=1)
+def load_rawpy() -> Optional[RawpySupport]:
+    """Return the rawpy module when the dependency can be imported safely."""
+
+    try:
+        import rawpy  # type: ignore[import-untyped]
+    except Exception:  # pragma: no cover - optional dependency
+        return None
+    return RawpySupport(rawpy=rawpy)
+
+
+@dataclass(frozen=True)
 class DebuggerPrerequisites:
     """Result describing whether debugger integrations can load."""
 

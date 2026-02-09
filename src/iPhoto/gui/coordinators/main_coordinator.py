@@ -338,6 +338,10 @@ class MainCoordinator(QObject):
         # Grid interactions
         ui.grid_view.itemClicked.connect(self._on_asset_clicked)
 
+        # External file drop support – allows importing files by dragging them
+        # onto the grid surface.
+        ui.grid_view.configure_external_drop(handler=self._handle_grid_external_drop)
+
         # Filmstrip clicks are now handled by PlaybackCoordinator
 
         # Connect favorite click from grid view
@@ -476,6 +480,13 @@ class MainCoordinator(QObject):
         if self._selection_controller and self._selection_controller.is_active():
             return
         self._playback.play_asset(index.row())
+
+    def _handle_grid_external_drop(self, paths: list) -> None:
+        """Import files dropped onto the grid into the current album."""
+
+        if not paths:
+            return
+        self._facade.import_files(paths)
 
     def _on_favorite_clicked(self, index: QModelIndex):
         """Handle favorite badge click from grid view."""
