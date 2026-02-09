@@ -600,7 +600,7 @@ class GLImageViewer(QOpenGLWidget):
             straighten, rotate_steps, _ = self._rotation_parameters()
             self._update_cover_scale(straighten, rotate_steps)
             # Print post-upload diagnostics
-            tex_w, tex_h = self._texture_size()
+            tex_w, tex_h = self._texture_dimensions()
             fit_tex_w, fit_tex_h = self._display_texture_dimensions()
             eff_scale = self._transform_controller.get_effective_scale()
             cover = self._transform_controller.get_image_cover_scale()
