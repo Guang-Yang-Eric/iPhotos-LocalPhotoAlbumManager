@@ -178,6 +178,52 @@ def _bake_combined_lut(adjustments: Mapping[str, Any]) -> Optional[np.ndarray]:
     return lut
 
 
+def _write_tone_curve_seq(
+    parent: ET.Element,
+    tag_local: str,
+    points: List[Tuple[float, float]],
+) -> None:
+    """Write a ``crs:ToneCurvePV2012*`` element as an ``rdf:Seq``.
+
+    Adobe Camera Raw stores tone curves as nested ``rdf:Seq`` lists where
+    each ``rdf:li`` value is ``"x, y"`` with coordinates in the 0-255
+    integer range.  The *points* are expected in the IPO 0.0-1.0 range
+    and are scaled automatically.
+    """
+    curve_el = ET.SubElement(parent, f"{{{_NS_CRS}}}{tag_local}")
+    seq = ET.SubElement(curve_el, f"{{{_NS_RDF}}}Seq")
+    for x, y in points:
+        li = ET.SubElement(seq, f"{{{_NS_RDF}}}li")
+        li.text = f"{round(x * 255)}, {round(y * 255)}"
+
+
+def _read_tone_curve_seq(
+    desc: ET.Element,
+    tag_local: str,
+) -> Optional[List[Tuple[float, float]]]:
+    """Read an Adobe ``crs:ToneCurvePV2012*`` sequence back to 0-1 points."""
+    curve_el = desc.find(f"{{{_NS_CRS}}}{tag_local}")
+    if curve_el is None:
+        return None
+    seq = curve_el.find(f"{{{_NS_RDF}}}Seq")
+    if seq is None:
+        return None
+    points: List[Tuple[float, float]] = []
+    for li in seq.findall(f"{{{_NS_RDF}}}li"):
+        if li.text is None:
+            continue
+        parts = li.text.split(",")
+        if len(parts) != 2:
+            continue
+        try:
+            x = float(parts[0].strip()) / 255.0
+            y = float(parts[1].strip()) / 255.0
+            points.append((x, y))
+        except (ValueError, TypeError):
+            continue
+    return points if points else None
+
+
 def ipo_to_xmp(adjustments: Dict[str, Any]) -> str:
     """Convert IPO internal adjustments to an XMP XML string.
 
@@ -227,6 +273,25 @@ def ipo_to_xmp(adjustments: Dict[str, Any]) -> str:
     if lut is not None:
         desc.set(f"{{{_NS_IPO}}}BakedLUT", _encode_lut_base64(lut))
         desc.set(f"{{{_NS_IPO}}}BakedLUTSize", "256")
+
+    # Adobe-compatible tone curves (crs:ToneCurvePV2012*)
+    # Written alongside the baked LUT so Adobe Photoshop / Camera Raw can
+    # recognise the curves natively.
+    curve_enabled = bool(adjustments.get("Curve_Enabled", False))
+    if curve_enabled:
+        _CURVE_CHANNEL_MAP = [
+            ("Curve_RGB", "ToneCurvePV2012"),
+            ("Curve_Red", "ToneCurvePV2012Red"),
+            ("Curve_Green", "ToneCurvePV2012Green"),
+            ("Curve_Blue", "ToneCurvePV2012Blue"),
+        ]
+        for ipo_key, crs_tag in _CURVE_CHANNEL_MAP:
+            raw = adjustments.get(ipo_key)
+            if raw and isinstance(raw, list):
+                _write_tone_curve_seq(desc, crs_tag, raw)
+            else:
+                # Identity curve
+                _write_tone_curve_seq(desc, crs_tag, [(0.0, 0.0), (1.0, 1.0)])
 
     # B&W
     if bool(adjustments.get("BW_Enabled", False)):
@@ -374,6 +439,22 @@ def xmp_to_ipo(xmp_content: str) -> Dict[str, Any]:
         if lut is not None:
             result["BakedLUT"] = lut
             result["BakedLUT_Enabled"] = True
+
+    # Adobe-compatible tone curves (fallback when no baked LUT)
+    _CURVE_READ_MAP = [
+        ("ToneCurvePV2012", "Curve_RGB"),
+        ("ToneCurvePV2012Red", "Curve_Red"),
+        ("ToneCurvePV2012Green", "Curve_Green"),
+        ("ToneCurvePV2012Blue", "Curve_Blue"),
+    ]
+    curve_found = False
+    for crs_tag, ipo_key in _CURVE_READ_MAP:
+        pts = _read_tone_curve_seq(desc, crs_tag)
+        if pts is not None:
+            result[ipo_key] = pts
+            curve_found = True
+    if curve_found:
+        result["Curve_Enabled"] = True
 
     # B&W
     grayscale = desc.get(f"{{{_NS_CRS}}}ConvertToGrayscale")
