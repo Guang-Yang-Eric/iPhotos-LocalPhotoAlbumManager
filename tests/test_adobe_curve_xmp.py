@@ -2,7 +2,17 @@
 
 import xml.etree.ElementTree as ET
 
-from src.iPhoto.io.xmp_sidecar import ipo_to_xmp, xmp_to_ipo
+import numpy as np
+
+from src.iPhoto.core.light_resolver import resolve_light_vector
+from src.iPhoto.io.xmp_sidecar import (
+    _apply_channel_adjustments_lut,
+    _BRIGHTNESS_FACTOR,
+    _BRILLIANCE_FACTOR,
+    _EXPOSURE_FACTOR,
+    ipo_to_xmp,
+    xmp_to_ipo,
+)
 
 _NS_CRS = "http://ns.adobe.com/camera-raw-settings/1.0/"
 _NS_RDF = "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
@@ -147,12 +157,29 @@ class TestAdobeCurveExport:
         # With exposure=0.5, input 0 should map to something > 0
         assert red[0][1] > 0, "Exposure should lift blacks"
 
-    def test_light_master_baked_into_curve(self):
+    def test_light_master_baked_into_curve(self) -> None:
         """Light master slider should be resolved into the baked tone curve."""
         adj = {"Light_Master": 1.0}
         xmp = ipo_to_xmp(adj)
         red = self._parse_tone_curve(xmp, "ToneCurvePV2012Red")
-        assert red[0][1] > 0, "Light master should lift blacks"
+        resolved = resolve_light_vector(1.0, {}, mode="delta")
+        exposure_term = resolved["Exposure"] * _EXPOSURE_FACTOR
+        brightness_term = resolved["Brightness"] * _BRIGHTNESS_FACTOR
+        brilliance_strength = resolved["Brilliance"] * _BRILLIANCE_FACTOR
+        contrast_factor = 1.0 + resolved["Contrast"]
+        channel = np.array([0.0, 0.5], dtype=np.float32)
+        adjusted = _apply_channel_adjustments_lut(
+            channel,
+            exposure_term,
+            brightness_term,
+            brilliance_strength,
+            resolved["Highlights"],
+            resolved["Shadows"],
+            contrast_factor,
+            resolved["BlackPoint"],
+        )
+        assert red[0][1] == int(round(float(adjusted[0]) * 255.0))
+        assert red[128][1] == int(round(float(adjusted[1]) * 255.0))
 
     def test_all_params_roundtrip_losslessly(self):
         """All IPO parameters survive round-trip via ipo: namespace."""

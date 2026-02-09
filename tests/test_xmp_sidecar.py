@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-import xml.etree.ElementTree as ET
 from pathlib import Path
+import xml.etree.ElementTree as ET
 
 import numpy as np
 import pytest
 
+from src.iPhoto.core.color_resolver import ColorResolver, ColorStats
 from src.iPhoto.io.xmp_sidecar import (
     export_xmp,
     ipo_to_xmp,
@@ -116,7 +117,11 @@ class TestIpoToXmpConversion:
         assert desc is not None
         sat = float(desc.get(f"{{{_NS_CRS}}}Saturation", "0"))
         vib = float(desc.get(f"{{{_NS_CRS}}}Vibrance", "0"))
-        assert abs(sat) > 0.01 or abs(vib) > 0.01
+        resolved = ColorResolver.resolve_color_vector(1.0, {}, stats=ColorStats(), mode="delta")
+        expected_sat = resolved["Saturation"] * 100.0
+        expected_vib = resolved["Vibrance"] * 100.0
+        assert pytest.approx(expected_sat, abs=0.05) == sat
+        assert pytest.approx(expected_vib, abs=0.05) == vib
 
 
 class TestXmpToIpoConversion:

@@ -22,6 +22,7 @@ the CRS approximations are lossy.
 from __future__ import annotations
 
 import base64
+import logging
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Tuple
@@ -53,6 +54,8 @@ _NSMAP = {
     "crs": _NS_CRS,
     "ipo": _NS_IPO,
 }
+
+_LOGGER = logging.getLogger(__name__)
 
 # Register namespaces so ``ET.tostring`` uses readable prefixes.
 for _prefix, _uri in _NSMAP.items():
@@ -97,21 +100,27 @@ _CURVE_CHANNEL_MAP: List[Tuple[str, str]] = [
 ]
 
 
+def _safe_float(value: Any, default_value: float) -> float:
+    """Return *value* coerced to float, or *default_value* if conversion fails."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default_value
+
+
 def _resolve_adjustments_for_xmp(
     adjustments: Mapping[str, Any],
     *,
     color_stats: ColorStats | None = None,
 ) -> Dict[str, Any]:
-    """Resolve master sliders and stats-driven adjustments for XMP export."""
+    """Resolve master sliders and stats-driven adjustments for XMP export.
+
+    When ``color_stats`` is ``None``, :class:`ColorStats` defaults are used to
+    keep the conversion deterministic.
+    """
     resolved: Dict[str, Any] = {}
     light_overrides: Dict[str, float] = {}
     color_overrides: Dict[str, float] = {}
-
-    def _safe_float(value: Any, fallback: float) -> float:
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return float(fallback)
 
     for key, value in adjustments.items():
         if key in ("Light_Master", "Light_Enabled", "Color_Master", "Color_Enabled"):
@@ -130,14 +139,14 @@ def _resolve_adjustments_for_xmp(
             resolved[key] = value
 
     stats_obj = ColorStats.ensure(color_stats)
-    master_value = _safe_float(adjustments.get("Light_Master", 0.0), 0.0)
+    master_value = _safe_float(adjustments.get("Light_Master"), 0.0)
     light_enabled = bool(adjustments.get("Light_Enabled", True))
     if light_enabled:
         resolved.update(resolve_light_vector(master_value, light_overrides, mode="delta"))
     else:
         resolved.update({key: 0.0 for key in LIGHT_KEYS})
 
-    color_master = _safe_float(adjustments.get("Color_Master", 0.0), 0.0)
+    color_master = _safe_float(adjustments.get("Color_Master"), 0.0)
     color_enabled = bool(adjustments.get("Color_Enabled", True))
     if color_enabled:
         resolved.update(
@@ -151,9 +160,9 @@ def _resolve_adjustments_for_xmp(
     else:
         resolved.update({key: 0.0 for key in COLOR_KEYS})
 
-    if any(
-        key in adjustments for key in ("Color_Gain_R", "Color_Gain_G", "Color_Gain_B")
-    ):
+    gain_keys = ("Color_Gain_R", "Color_Gain_G", "Color_Gain_B")
+    has_gain_overrides = any(key in adjustments for key in gain_keys)
+    if has_gain_overrides:
         resolved["Color_Gain_R"] = _safe_float(
             adjustments.get("Color_Gain_R", stats_obj.white_balance_gain[0]),
             stats_obj.white_balance_gain[0],
@@ -176,19 +185,30 @@ def _resolve_adjustments_for_xmp(
 
 
 def _try_compute_color_stats(asset_path: Path) -> ColorStats | None:
-    """Best-effort helper to compute ColorStats from the asset preview."""
+    """Best-effort helper to compute ColorStats from the asset preview.
+
+    Parameters
+    ----------
+    asset_path:
+        Path to the image/RAW file used for statistics extraction.
+
+    Returns ``None`` when the image cannot be loaded or statistics computation
+    fails, keeping XMP export resilient.
+    """
     try:
         from ..core.color_resolver import compute_color_statistics
         from ..utils.image_loader import load_qimage
-    except Exception:
+    except (ImportError, ModuleNotFoundError):
         return None
 
     image = load_qimage(asset_path)
-    if image is None or image.isNull():
+    if image is None:
+        _LOGGER.debug("Failed to load image for color stats computation: %s", asset_path)
         return None
     try:
         return compute_color_statistics(image)
-    except Exception:
+    except (RuntimeError, ValueError, TypeError):
+        _LOGGER.debug("Failed to compute color stats for %s", asset_path, exc_info=True)
         return None
 
 
