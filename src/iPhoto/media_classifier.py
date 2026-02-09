@@ -6,6 +6,28 @@ from enum import IntEnum
 from pathlib import Path
 from typing import Mapping, Tuple
 
+RAW_EXTENSIONS: frozenset[str] = frozenset({
+    ".cr2",
+    ".cr3",
+    ".nef",
+    ".nrw",
+    ".arw",
+    ".srf",
+    ".sr2",
+    ".orf",
+    ".rw2",
+    ".raf",
+    ".dng",
+    ".pef",
+    ".raw",
+    ".rwl",
+    ".3fr",
+    ".iiq",
+    ".x3f",
+    ".srw",
+    ".erf",
+})
+
 IMAGE_EXTENSIONS: frozenset[str] = frozenset({
     ".jpg",
     ".jpeg",
@@ -14,7 +36,7 @@ IMAGE_EXTENSIONS: frozenset[str] = frozenset({
     ".heif",
     ".heifs",
     ".heicf",
-})
+}) | RAW_EXTENSIONS
 
 VIDEO_EXTENSIONS: frozenset[str] = frozenset({
     ".mov",
@@ -98,4 +120,4 @@ def get_media_type(path: Path) -> MediaType:
     return MediaType.UNKNOWN
 
 
-__all__ = ["classify_media", "get_media_type", "MediaType", "IMAGE_EXTENSIONS", "VIDEO_EXTENSIONS"]
+__all__ = ["classify_media", "get_media_type", "MediaType", "IMAGE_EXTENSIONS", "VIDEO_EXTENSIONS", "RAW_EXTENSIONS"]
