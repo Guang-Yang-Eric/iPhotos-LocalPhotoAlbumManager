@@ -172,6 +172,14 @@ class ThumbnailCacheService(QObject):
         if size.isEmpty() or not size.isValid():
             return None
 
+        from ...media_classifier import RAW_EXTENSIONS
+        is_raw = path.suffix.lower() in RAW_EXTENSIONS
+        if is_raw:
+            print(
+                f"[THUMB DEBUG] _render_thumbnail: {path.name} "
+                f"requested_size={size.width()}x{size.height()}"
+            )
+
         video_exts = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v"}
         is_video = path.suffix.lower() in video_exts
         qimage: Optional[QImage] = None
@@ -181,8 +189,21 @@ class ThumbnailCacheService(QObject):
         if qimage is None or qimage.isNull():
             pil_image = self._generator.generate(path, (size.width(), size.height()))
             if pil_image is None:
+                if is_raw:
+                    print(f"[THUMB DEBUG] FAILED: both load_qimage and PillowGenerator returned None")
                 return None
             qimage = image_loader.qimage_from_pil(pil_image)
+
+        if qimage is None or qimage.isNull():
+            if is_raw:
+                print(f"[THUMB DEBUG] FAILED: final qimage is None/null")
+            return None
+
+        if is_raw:
+            print(
+                f"[THUMB DEBUG] loaded: {qimage.width()}x{qimage.height()} "
+                f"format={qimage.format()}"
+            )
 
         if qimage is None or qimage.isNull():
             return None

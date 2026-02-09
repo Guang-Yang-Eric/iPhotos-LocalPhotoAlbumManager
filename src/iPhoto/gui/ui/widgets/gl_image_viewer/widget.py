@@ -194,12 +194,22 @@ class GLImageViewer(QOpenGLWidget):
             mode can reuse the detail view framing without a visible jump.
         """
 
+        if image is not None and not image.isNull():
+            print(
+                f"[GL DEBUG] set_image: {image.width()}x{image.height()} "
+                f"format={image.format()} reset_view={reset_view} "
+                f"source={image_source}"
+            )
+        else:
+            print(f"[GL DEBUG] set_image: image=None/null, clearing viewer")
+
         # Check if we can reuse the existing texture
         if self._texture_manager.should_reuse_texture(image_source):
             if image is not None and not image.isNull():
                 # Skip texture re-upload, only update adjustments. Preserve the
                 # current zoom/pan state so adjustment previews stay anchored
                 # to the user's active viewport.
+                print(f"[GL DEBUG] reusing existing texture, only updating adjustments")
                 self.set_adjustments(adjustments)
                 return
 
@@ -581,9 +591,36 @@ class GLImageViewer(QOpenGLWidget):
             and not self._image.isNull()
             and not self._renderer.has_texture()
         ):
+            print(
+                f"[GL DEBUG] paintGL uploading texture: "
+                f"image={self._image.width()}x{self._image.height()} "
+                f"viewport={vw}x{vh} dpr={dpr}"
+            )
             self._renderer.upload_texture(self._image)
             straighten, rotate_steps, _ = self._rotation_parameters()
             self._update_cover_scale(straighten, rotate_steps)
+            # Print post-upload diagnostics
+            tex_w, tex_h = self._texture_size()
+            fit_tex_w, fit_tex_h = self._display_texture_dimensions()
+            eff_scale = self._transform_controller.get_effective_scale()
+            cover = self._transform_controller.get_image_cover_scale()
+            print(
+                f"[GL DEBUG] texture uploaded: "
+                f"tex_size={tex_w}x{tex_h}, "
+                f"display_tex_size={fit_tex_w}x{fit_tex_h}, "
+                f"effective_scale={eff_scale:.6f}, cover_scale={cover:.6f}, "
+                f"viewport={vw}x{vh}, dpr={dpr}"
+            )
+            # Pixel density: how many screen pixels per texture pixel
+            if tex_w > 0 and tex_h > 0:
+                drawn_w = tex_w * eff_scale * cover
+                drawn_h = tex_h * eff_scale * cover
+                print(
+                    f"[GL DEBUG] quality check: "
+                    f"drawn_size={drawn_w:.0f}x{drawn_h:.0f} vs viewport={vw}x{vh}, "
+                    f"pixels_per_texel_x={drawn_w/tex_w:.3f}, "
+                    f"pixels_per_texel_y={drawn_h/tex_h:.3f}"
+                )
         if not self._renderer.has_texture():
             return
 
