@@ -22,7 +22,6 @@ the CRS approximations are lossy.
 from __future__ import annotations
 
 import base64
-import struct
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Tuple
@@ -32,14 +31,10 @@ import numpy as np
 from ..core.curve_resolver import (
     CurveParams,
     CurveChannel,
-    DEFAULT_CURVE_POINTS,
     generate_curve_lut,
 )
-from ..core.levels_resolver import DEFAULT_LEVELS_HANDLES, build_levels_lut
-from ..core.light_resolver import LIGHT_KEYS
-from ..core.color_resolver import COLOR_KEYS
-from ..core.wb_resolver import WB_KEYS, WB_DEFAULTS
-from ..core.selective_color_resolver import DEFAULT_SELECTIVE_COLOR_RANGES, NUM_RANGES
+from ..core.levels_resolver import build_levels_lut
+from ..core.selective_color_resolver import NUM_RANGES
 
 # ---------------------------------------------------------------------------
 # XML namespaces
@@ -432,9 +427,7 @@ def _load_raw_ipo_values(desc: ET.Element) -> Dict[str, Any]:
             try:
                 result[key] = float(val)
             except (ValueError, TypeError):
-                pass
-
-    # Boolean flags
+                pass  # Skip non-numeric scalar values from XMP
     for key in _IPO_BOOL_KEYS:
         val = desc.get(f"{{{_NS_IPO}}}{key}")
         if val is not None:
@@ -463,7 +456,7 @@ def _load_raw_ipo_values(desc: ET.Element) -> Dict[str, Any]:
             if len(handles) == 5:
                 result["Levels_Handles"] = handles
         except (ValueError, TypeError):
-            pass
+            pass  # Ignore malformed levels handles; rely on defaults
 
     return result
 
@@ -653,9 +646,7 @@ def xmp_to_ipo(xmp_content: str) -> Dict[str, Any]:
                     result[ipo_key] = float(val) * inv_factor
                     light_found = True
                 except (ValueError, TypeError):
-                    pass
-
-    # Brilliance ← Clarity
+                    pass  # Skip non-numeric CRS light parameter values
     if "Brilliance" not in result:
         clarity = desc.get(f"{{{_NS_CRS}}}Clarity2012")
         if clarity is not None:
@@ -663,7 +654,7 @@ def xmp_to_ipo(xmp_content: str) -> Dict[str, Any]:
                 result["Brilliance"] = float(clarity) * 0.01
                 light_found = True
             except (ValueError, TypeError):
-                pass
+                pass  # Ignore malformed Clarity values from XMP
 
     if light_found and "Light_Enabled" not in result:
         result["Light_Enabled"] = True
@@ -679,7 +670,7 @@ def xmp_to_ipo(xmp_content: str) -> Dict[str, Any]:
                     result[ipo_key] = float(val) * inv_factor
                     color_found = True
                 except (ValueError, TypeError):
-                    pass
+                    pass  # Skip non-numeric CRS color parameter values
 
     if color_found and "Color_Enabled" not in result:
         result["Color_Enabled"] = True
@@ -697,14 +688,14 @@ def xmp_to_ipo(xmp_content: str) -> Dict[str, Any]:
                         xmp_temp = float(temp_str)
                         result["WB_Temperature"] = (xmp_temp - _WB_TEMP_CENTER) / _WB_TEMP_RANGE
                     except (ValueError, TypeError):
-                        pass
+                        pass  # Ignore malformed temperature value
             if "WB_Tint" not in result:
                 tint_str = desc.get(f"{{{_NS_CRS}}}Tint")
                 if tint_str is not None:
                     try:
                         result["WB_Tint"] = float(tint_str) / _WB_TINT_FACTOR
                     except (ValueError, TypeError):
-                        pass
+                        pass  # Ignore malformed tint value
 
     # Crop
     result.update(_xmp_crop_to_ipo(desc))

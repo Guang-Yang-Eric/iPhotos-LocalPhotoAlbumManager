@@ -49,48 +49,49 @@ def _load_raw_with_rawpy(
     """
     rp_support = load_rawpy()
     if rp_support is None:
-        print(f"[RAW DEBUG] rawpy not available, cannot decode {source.name}")
+        _LOGGER.debug("rawpy not available, cannot decode %s", source.name)
         return None
 
     rawpy = rp_support.rawpy
     try:
         with rawpy.imread(str(source)) as raw:
             raw_sizes = raw.sizes
-            print(
-                f"[RAW DEBUG] sensor={source.name}: "
-                f"raw_width={raw_sizes.raw_width}, raw_height={raw_sizes.raw_height}, "
-                f"width={raw_sizes.width}, height={raw_sizes.height}, "
-                f"iwidth={raw_sizes.iwidth}, iheight={raw_sizes.iheight}"
+            _LOGGER.debug(
+                "sensor=%s: raw_width=%d, raw_height=%d, width=%d, height=%d, "
+                "iwidth=%d, iheight=%d",
+                source.name, raw_sizes.raw_width, raw_sizes.raw_height,
+                raw_sizes.width, raw_sizes.height,
+                raw_sizes.iwidth, raw_sizes.iheight,
             )
             # ``postprocess`` demosaics + white-balances the sensor data and
             # returns an ``(H, W, 3)`` uint8 RGB array at full sensor resolution.
             rgb = raw.postprocess(use_camera_wb=True, no_auto_bright=False)
     except Exception:
         _LOGGER.debug("rawpy failed to decode %s", source, exc_info=True)
-        print(f"[RAW DEBUG] rawpy FAILED to decode {source.name}")
         return None
 
     h, w, channels = rgb.shape
-    print(f"[RAW DEBUG] postprocess output: {w}x{h} channels={channels}")
+    _LOGGER.debug("postprocess output: %dx%d channels=%d", w, h, channels)
     if channels < 3 or h == 0 or w == 0:
-        print(f"[RAW DEBUG] INVALID postprocess output, returning None")
+        _LOGGER.debug("invalid postprocess output for %s, returning None", source.name)
         return None
 
     # Build a QImage from the raw RGB buffer.  The data must remain alive
     # while the QImage references it, so we call ``.copy()`` immediately.
     bytes_per_line = w * 3
     image = QImage(rgb.data, w, h, bytes_per_line, QImage.Format.Format_RGB888).copy()
-    print(
-        f"[RAW DEBUG] QImage created: {image.width()}x{image.height()} "
-        f"format={image.format()} isNull={image.isNull()}"
+    _LOGGER.debug(
+        "QImage created: %dx%d format=%s isNull=%s",
+        image.width(), image.height(), image.format(), image.isNull(),
     )
 
     if target is not None and target.isValid() and not target.isEmpty():
         src_size = image.size()
         scaled_target = src_size.scaled(target, Qt.AspectRatioMode.KeepAspectRatio)
-        print(
-            f"[RAW DEBUG] target={target.width()}x{target.height()}, "
-            f"scaled_target={scaled_target.width()}x{scaled_target.height()}"
+        _LOGGER.debug(
+            "target=%dx%d, scaled_target=%dx%d",
+            target.width(), target.height(),
+            scaled_target.width(), scaled_target.height(),
         )
         if (
             scaled_target.width() < src_size.width()
@@ -101,17 +102,15 @@ def _load_raw_with_rawpy(
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             )
-            print(
-                f"[RAW DEBUG] DOWNSCALED to {image.width()}x{image.height()}"
-            )
+            _LOGGER.debug("downscaled to %dx%d", image.width(), image.height())
         else:
-            print(f"[RAW DEBUG] no downscale needed (src <= target)")
+            _LOGGER.debug("no downscale needed (src <= target)")
     else:
-        print(f"[RAW DEBUG] target=None → full-resolution decode, no scaling")
+        _LOGGER.debug("target=None, full-resolution decode, no scaling")
 
-    print(
-        f"[RAW DEBUG] FINAL image: {image.width()}x{image.height()} "
-        f"depth={image.depth()} bytesPerLine={image.bytesPerLine()}"
+    _LOGGER.debug(
+        "FINAL image: %dx%d depth=%d bytesPerLine=%d",
+        image.width(), image.height(), image.depth(), image.bytesPerLine(),
     )
     return image
 
@@ -132,9 +131,9 @@ def load_qimage(source: Path, target: QSize | None = None) -> Optional[QImage]:
             return raw_image
         # Fall through to the standard pipeline so embedded previews are
         # still available when rawpy is missing.
-        print(
-            f"[RAW DEBUG] rawpy returned None for {source.name}, "
-            f"falling through to Qt/Pillow (embedded preview only)"
+        _LOGGER.debug(
+            "rawpy returned None for %s, falling through to Qt/Pillow",
+            source.name,
         )
 
     # ``QImageReader`` is most efficient when it can stream directly from the

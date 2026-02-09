@@ -6,8 +6,6 @@ import os
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import pytest
-
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from src.iPhoto.gui.viewmodels.asset_data_source import AssetDataSource

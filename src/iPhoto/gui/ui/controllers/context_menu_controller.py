@@ -327,7 +327,9 @@ class ContextMenuController(QObject):
             except OSError:
                 errors += 1
 
-        if exported > 0:
+        if exported > 0 and errors > 0:
+            self._toast.show_toast(f"Exported {exported} XMP file(s), {errors} failed")
+        elif exported > 0:
             self._toast.show_toast(f"Exported {exported} XMP file(s)")
         elif errors > 0:
             self._status_bar.show_message(

@@ -2,8 +2,6 @@
 
 import xml.etree.ElementTree as ET
 
-import pytest
-
 from src.iPhoto.io.xmp_sidecar import ipo_to_xmp, xmp_to_ipo
 
 _NS_CRS = "http://ns.adobe.com/camera-raw-settings/1.0/"

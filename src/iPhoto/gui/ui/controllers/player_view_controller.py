@@ -57,18 +57,8 @@ class _AdjustedImageWorker(QRunnable):
             return
 
         if image is None or image.isNull():
-            print(
-                f"[PLAYBACK DEBUG] image load FAILED for {self._source.name}: "
-                f"image={'None' if image is None else 'isNull'}"
-            )
             self._signals.failed.emit(self._source, "Image decoder returned an empty frame")
             return
-
-        print(
-            f"[PLAYBACK DEBUG] loaded {self._source.name}: "
-            f"{image.width()}x{image.height()} format={image.format()} "
-            f"depth={image.depth()} bytesPerLine={image.bytesPerLine()}"
-        )
 
         try:
             raw_adjustments = sidecar.load_adjustments(self._source)
@@ -81,11 +71,6 @@ class _AdjustedImageWorker(QRunnable):
             self._signals.failed.emit(self._source, str(exc))
             return
 
-        print(
-            f"[PLAYBACK DEBUG] sending to GL viewer: {self._source.name} "
-            f"{image.width()}x{image.height()}, adjustments={len(adjustments or {})} keys"
-        )
-        # Pass the raw image and adjustments to the main thread. The GL viewer
         # Pass the raw image and adjustments to the main thread. The GL viewer
         # will apply the adjustments on the GPU.
         self._signals.completed.emit(self._source, image, adjustments or {})
@@ -337,11 +322,6 @@ class PlayerViewController(QObject):
 
     def _apply_still_frame(self, source: Path, image: QImage, adjustments: dict) -> None:
         """Render the still image on the GL viewer."""
-        print(
-            f"[PLAYBACK DEBUG] _apply_still_frame: {source.name} "
-            f"{image.width()}x{image.height()} "
-            f"viewer_size={self._image_viewer.width()}x{self._image_viewer.height()}"
-        )
         self.show_image_surface()
         self._image_viewer.set_image(
             image,

@@ -490,8 +490,7 @@ def read_image_meta_with_exiftool(
         except (UnidentifiedImageError, OSError):
             # Pillow cannot decode every format (e.g. camera RAW files).
             # When geometry was already populated by ExifTool the file is
-            # still usable, so we only raise when the critical fields
-            # remain empty.
+            # still usable, so we log and continue with partial metadata.
             if info["w"] is None or info["h"] is None:
                 LOGGER.debug(
                     "Pillow could not open %s and dimensions are still missing; "

@@ -1,10 +1,6 @@
 """Tests for the Export XMP context menu action and _texture_size fix."""
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
-import tempfile
-
-import pytest
 
 
 class TestExportXmpContextMenu:

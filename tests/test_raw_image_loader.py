@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 from io import BytesIO
 from pathlib import Path
-from typing import Optional
 from unittest.mock import MagicMock, patch
 
 import numpy as np

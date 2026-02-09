@@ -222,12 +222,6 @@ class GLRenderer:
         # expectations and keeps the upload logic uniform for all callers.
         qimage = image.convertToFormat(QImage.Format.Format_RGBA8888)
         width, height = qimage.width(), qimage.height()
-        print(
-            f"[GL RENDERER DEBUG] upload_texture: "
-            f"input={image.width()}x{image.height()} format={image.format()}, "
-            f"converted={width}x{height} RGBA8888, "
-            f"bytesPerLine={qimage.bytesPerLine()}, sizeInBytes={qimage.sizeInBytes()}"
-        )
         buffer = qimage.constBits()
         byte_count = qimage.sizeInBytes()
         if hasattr(buffer, "setsize"):
