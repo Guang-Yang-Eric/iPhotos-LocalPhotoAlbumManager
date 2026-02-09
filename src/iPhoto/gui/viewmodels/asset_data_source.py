@@ -643,7 +643,7 @@ class AssetDataSource(QObject):
             if size_bytes is None:
                 size_bytes = _coerce_positive_number(metadata.get("bytes"))
 
-            if is_image_type and width > 0 and height > 0:
+            if is_image_type and width is not None and height is not None and width > 0 and height > 0:
                 aspect_ratio = width / height
                 if aspect_ratio >= 2.0:
                     if size_bytes is not None and size_bytes > 1 * 1024 * 1024:

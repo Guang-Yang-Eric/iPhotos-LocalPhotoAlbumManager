@@ -22,6 +22,8 @@ def _parse_dt(value: str | None) -> datetime | None:
         return None
 
 
+from ..media_classifier import RAW_EXTENSIONS
+
 _IMAGE_EXTENSIONS = {
     ".jpg",
     ".jpeg",
@@ -30,7 +32,7 @@ _IMAGE_EXTENSIONS = {
     ".heif",
     ".heifs",
     ".heicf",
-}
+} | RAW_EXTENSIONS
 
 def _is_photo(row: Dict[str, object]) -> bool:
     mime = row.get("mime")

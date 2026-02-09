@@ -487,10 +487,19 @@ def read_image_meta_with_exiftool(
                         info["mime"] = Image.MIME.get(img.format, None)
                 if need_dt_fallback:
                     exif_payload = img.getexif() if hasattr(img, "getexif") else None
-        except UnidentifiedImageError as exc:
-            raise ExternalToolError(f"Unable to read image metadata for {path}") from exc
-        except OSError as exc:
-            raise ExternalToolError(f"OS error while reading {path}: {exc}") from exc
+        except (UnidentifiedImageError, OSError):
+            # Pillow cannot decode every format (e.g. camera RAW files).
+            # When geometry was already populated by ExifTool the file is
+            # still usable, so we only raise when the critical fields
+            # remain empty.
+            if info["w"] is None or info["h"] is None:
+                LOGGER.debug(
+                    "Pillow could not open %s and dimensions are still missing; "
+                    "continuing with partial metadata",
+                    path,
+                )
+        except Exception:
+            LOGGER.debug("Unexpected error opening %s with Pillow", path, exc_info=True)
 
     if info["dt"] is None and exif_payload:
         fallback_dt = exif_payload.get(36867) or exif_payload.get(306)
