@@ -22,7 +22,6 @@ the CRS approximations are lossy.
 from __future__ import annotations
 
 import base64
-import json
 import struct
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -86,6 +85,11 @@ _COLOR_PARAM_MAP: List[Tuple[str, str, float, float]] = [
 _WB_TEMP_CENTER = 5500.0
 _WB_TEMP_RANGE = 4500.0
 _WB_TINT_FACTOR = 150.0
+
+# Facade pre-processing factors (must match facade.py for consistent baking)
+_EXPOSURE_FACTOR = 1.5
+_BRIGHTNESS_FACTOR = 0.75
+_BRILLIANCE_FACTOR = 0.6
 
 # Curve channel mapping: (ipo_key, crs_tag_local_name)
 _CURVE_CHANNEL_MAP: List[Tuple[str, str]] = [
@@ -218,10 +222,10 @@ def _bake_full_pipeline_lut(adjustments: Mapping[str, Any]) -> Optional[np.ndarr
     contrast = float(adjustments.get("Contrast", 0.0))
     black_point = float(adjustments.get("BlackPoint", 0.0))
 
-    # Facade pre-processing
-    exposure_term = exposure * 1.5
-    brightness_term = brightness * 0.75
-    brilliance_strength = brilliance * 0.6
+    # Facade pre-processing (factors must match facade.py)
+    exposure_term = exposure * _EXPOSURE_FACTOR
+    brightness_term = brightness * _BRIGHTNESS_FACTOR
+    brilliance_strength = brilliance * _BRILLIANCE_FACTOR
     contrast_factor = 1.0 + contrast
 
     light_active = any(
