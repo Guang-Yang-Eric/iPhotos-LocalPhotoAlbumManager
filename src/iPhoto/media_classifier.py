@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import mimetypes
 from enum import IntEnum
 from pathlib import Path
 from typing import Mapping, Tuple
@@ -27,6 +28,33 @@ RAW_EXTENSIONS: frozenset[str] = frozenset({
     ".srw",
     ".erf",
 })
+
+# Register MIME types for RAW extensions that Python's mimetypes module
+# does not know about.  This ensures ``mimetypes.guess_type()`` returns a
+# useful ``image/`` type for these files rather than ``None``.
+_RAW_MIME_MAP = {
+    ".cr2": "image/x-canon-cr2",
+    ".cr3": "image/x-canon-cr3",
+    ".nef": "image/x-nikon-nef",
+    ".nrw": "image/x-nikon-nrw",
+    ".arw": "image/x-sony-arw",
+    ".srf": "image/x-sony-srf",
+    ".sr2": "image/x-sony-sr2",
+    ".orf": "image/x-olympus-orf",
+    ".rw2": "image/x-panasonic-rw2",
+    ".raf": "image/x-fuji-raf",
+    ".dng": "image/x-adobe-dng",
+    ".pef": "image/x-pentax-pef",
+    ".raw": "image/x-raw",
+    ".rwl": "image/x-leica-rwl",
+    ".3fr": "image/x-hasselblad-3fr",
+    ".iiq": "image/x-phaseone-iiq",
+    ".x3f": "image/x-sigma-x3f",
+    ".srw": "image/x-samsung-srw",
+    ".erf": "image/x-epson-erf",
+}
+for _ext, _mime in _RAW_MIME_MAP.items():
+    mimetypes.add_type(_mime, _ext)
 
 IMAGE_EXTENSIONS: frozenset[str] = frozenset({
     ".jpg",
