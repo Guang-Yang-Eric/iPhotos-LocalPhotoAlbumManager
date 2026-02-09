@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import xml.etree.ElementTree as ET
+from pathlib import Path
+
 import numpy as np
 import pytest
-from pathlib import Path
 
 from src.iPhoto.io.xmp_sidecar import (
     export_xmp,
@@ -15,6 +17,9 @@ from src.iPhoto.io.xmp_sidecar import (
     _encode_lut_base64,
     _decode_lut_base64,
 )
+
+_NS_CRS = "http://ns.adobe.com/camera-raw-settings/1.0/"
+_NS_RDF = "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
 
 
 class TestXmpSidecarPath:
@@ -102,6 +107,16 @@ class TestIpoToXmpConversion:
         assert parsed.get("SelectiveColor_Enabled") is True
         assert len(parsed["SelectiveColor_Ranges"]) == 6
         assert pytest.approx(0.1, abs=0.001) == parsed["SelectiveColor_Ranges"][0][2]
+
+    def test_color_master_resolves_into_crs(self) -> None:
+        adj = {"Color_Master": 1.0}
+        xmp = ipo_to_xmp(adj)
+        root = ET.fromstring(xmp)
+        desc = root.find(f".//{{{_NS_RDF}}}Description")
+        assert desc is not None
+        sat = float(desc.get(f"{{{_NS_CRS}}}Saturation", "0"))
+        vib = float(desc.get(f"{{{_NS_CRS}}}Vibrance", "0"))
+        assert abs(sat) > 0.01 or abs(vib) > 0.01
 
 
 class TestXmpToIpoConversion:

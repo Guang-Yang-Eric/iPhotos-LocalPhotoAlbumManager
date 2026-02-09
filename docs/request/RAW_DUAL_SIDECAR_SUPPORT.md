@@ -119,8 +119,8 @@ def load_xmp_adjustments(asset_path: Path) -> Dict[str, Any]:
 def export_xmp(asset_path: Path, adjustments: Mapping[str, Any]) -> Path:
     """将内部调整参数导出为 Adobe XMP 格式"""
 
-def ipo_to_xmp(adjustments: Dict[str, Any]) -> str:
-    """将 IPO 内部格式转换为 XMP XML 字符串"""
+def ipo_to_xmp(adjustments: Dict[str, Any], *, color_stats: ColorStats | None = None) -> str:
+    """将 IPO 内部格式转换为 XMP XML 字符串（可选传入色彩统计用于等价导出）"""
 
 def xmp_to_ipo(xmp_content: str) -> Dict[str, Any]:
     """将 XMP XML 字符串解析为 IPO 内部格式"""

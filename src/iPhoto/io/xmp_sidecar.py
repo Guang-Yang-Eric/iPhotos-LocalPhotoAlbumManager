@@ -28,11 +28,13 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 import numpy as np
 
+from ..core.color_resolver import COLOR_KEYS, ColorResolver, ColorStats
 from ..core.curve_resolver import (
     CurveParams,
     CurveChannel,
     generate_curve_lut,
 )
+from ..core.light_resolver import LIGHT_KEYS, resolve_light_vector
 from ..core.levels_resolver import build_levels_lut
 from ..core.selective_color_resolver import NUM_RANGES
 
@@ -93,6 +95,101 @@ _CURVE_CHANNEL_MAP: List[Tuple[str, str]] = [
     ("Curve_Green", "ToneCurvePV2012Green"),
     ("Curve_Blue", "ToneCurvePV2012Blue"),
 ]
+
+
+def _resolve_adjustments_for_xmp(
+    adjustments: Mapping[str, Any],
+    *,
+    color_stats: ColorStats | None = None,
+) -> Dict[str, Any]:
+    """Resolve master sliders and stats-driven adjustments for XMP export."""
+    resolved: Dict[str, Any] = {}
+    light_overrides: Dict[str, float] = {}
+    color_overrides: Dict[str, float] = {}
+
+    def _safe_float(value: Any, fallback: float) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return float(fallback)
+
+    for key, value in adjustments.items():
+        if key in ("Light_Master", "Light_Enabled", "Color_Master", "Color_Enabled"):
+            continue
+        if key in LIGHT_KEYS:
+            try:
+                light_overrides[key] = float(value)
+            except (TypeError, ValueError):
+                continue
+        elif key in COLOR_KEYS:
+            try:
+                color_overrides[key] = float(value)
+            except (TypeError, ValueError):
+                continue
+        else:
+            resolved[key] = value
+
+    stats_obj = ColorStats.ensure(color_stats)
+    master_value = _safe_float(adjustments.get("Light_Master", 0.0), 0.0)
+    light_enabled = bool(adjustments.get("Light_Enabled", True))
+    if light_enabled:
+        resolved.update(resolve_light_vector(master_value, light_overrides, mode="delta"))
+    else:
+        resolved.update({key: 0.0 for key in LIGHT_KEYS})
+
+    color_master = _safe_float(adjustments.get("Color_Master", 0.0), 0.0)
+    color_enabled = bool(adjustments.get("Color_Enabled", True))
+    if color_enabled:
+        resolved.update(
+            ColorResolver.resolve_color_vector(
+                color_master,
+                color_overrides,
+                stats=stats_obj,
+                mode="delta",
+            )
+        )
+    else:
+        resolved.update({key: 0.0 for key in COLOR_KEYS})
+
+    if any(
+        key in adjustments for key in ("Color_Gain_R", "Color_Gain_G", "Color_Gain_B")
+    ):
+        resolved["Color_Gain_R"] = _safe_float(
+            adjustments.get("Color_Gain_R", stats_obj.white_balance_gain[0]),
+            stats_obj.white_balance_gain[0],
+        )
+        resolved["Color_Gain_G"] = _safe_float(
+            adjustments.get("Color_Gain_G", stats_obj.white_balance_gain[1]),
+            stats_obj.white_balance_gain[1],
+        )
+        resolved["Color_Gain_B"] = _safe_float(
+            adjustments.get("Color_Gain_B", stats_obj.white_balance_gain[2]),
+            stats_obj.white_balance_gain[2],
+        )
+    else:
+        gain_r, gain_g, gain_b = stats_obj.white_balance_gain
+        resolved["Color_Gain_R"] = float(gain_r)
+        resolved["Color_Gain_G"] = float(gain_g)
+        resolved["Color_Gain_B"] = float(gain_b)
+
+    return resolved
+
+
+def _try_compute_color_stats(asset_path: Path) -> ColorStats | None:
+    """Best-effort helper to compute ColorStats from the asset preview."""
+    try:
+        from ..core.color_resolver import compute_color_statistics
+        from ..utils.image_loader import load_qimage
+    except Exception:
+        return None
+
+    image = load_qimage(asset_path)
+    if image is None or image.isNull():
+        return None
+    try:
+        return compute_color_statistics(image)
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -461,7 +558,7 @@ def _load_raw_ipo_values(desc: ET.Element) -> Dict[str, Any]:
     return result
 
 
-def ipo_to_xmp(adjustments: Dict[str, Any]) -> str:
+def ipo_to_xmp(adjustments: Dict[str, Any], *, color_stats: ColorStats | None = None) -> str:
     """Convert IPO internal adjustments to an XMP XML string.
 
     The returned string is a valid XMP document with:
@@ -471,6 +568,8 @@ def ipo_to_xmp(adjustments: Dict[str, Any]) -> str:
     - Complete raw IPO values in ``ipo:`` for lossless round-trip
     - Baked 256×3 LUT in ``ipo:BakedLUT`` for exact per-channel reproduction
     """
+    resolved = _resolve_adjustments_for_xmp(adjustments, color_stats=color_stats)
+
     root = ET.Element(f"{{{_NS_X}}}xmpmeta")
     rdf = ET.SubElement(root, f"{{{_NS_RDF}}}RDF")
     desc = ET.SubElement(rdf, f"{{{_NS_RDF}}}Description")
@@ -479,24 +578,24 @@ def ipo_to_xmp(adjustments: Dict[str, Any]) -> str:
 
     # Light parameters (CRS approximation)
     for ipo_key, crs_attr, factor, _ in _LIGHT_PARAM_MAP:
-        value = float(adjustments.get(ipo_key, 0.0))
+        value = float(resolved.get(ipo_key, 0.0))
         xmp_val = value * factor
         desc.set(f"{{{_NS_CRS}}}{crs_attr}", f"{xmp_val:+.2f}")
 
     # Brilliance → Clarity (approximate)
-    brilliance = float(adjustments.get("Brilliance", 0.0))
+    brilliance = float(resolved.get("Brilliance", 0.0))
     desc.set(f"{{{_NS_CRS}}}Clarity2012", f"{brilliance * 100:+.2f}")
 
     # Color parameters
     for ipo_key, crs_attr, factor, _ in _COLOR_PARAM_MAP:
-        value = float(adjustments.get(ipo_key, 0.0))
+        value = float(resolved.get(ipo_key, 0.0))
         xmp_val = value * factor
         desc.set(f"{{{_NS_CRS}}}{crs_attr}", f"{xmp_val:+.2f}")
 
     # White balance
-    if bool(adjustments.get("WB_Enabled", False)):
-        temp = float(adjustments.get("WB_Temperature", 0.0))
-        tint = float(adjustments.get("WB_Tint", 0.0))
+    if bool(resolved.get("WB_Enabled", False)):
+        temp = float(resolved.get("WB_Temperature", 0.0))
+        tint = float(resolved.get("WB_Tint", 0.0))
         xmp_temp = _WB_TEMP_CENTER + temp * _WB_TEMP_RANGE
         xmp_tint = tint * _WB_TINT_FACTOR
         desc.set(f"{{{_NS_CRS}}}Temperature", f"{xmp_temp:.0f}")
@@ -512,7 +611,7 @@ def ipo_to_xmp(adjustments: Dict[str, Any]) -> str:
 
     # --- Baked per-channel pipeline LUT ---
     # Combines light + curves + levels into a single 256×3 LUT
-    lut = _bake_full_pipeline_lut(adjustments)
+    lut = _bake_full_pipeline_lut(resolved)
     if lut is not None:
         desc.set(f"{{{_NS_IPO}}}BakedLUT", _encode_lut_base64(lut))
         desc.set(f"{{{_NS_IPO}}}BakedLUTSize", "256")
@@ -537,23 +636,23 @@ def ipo_to_xmp(adjustments: Dict[str, Any]) -> str:
     else:
         # No per-channel effects — only write sparse curve points if curves
         # were explicitly enabled (backward compatibility)
-        curve_enabled = bool(adjustments.get("Curve_Enabled", False))
+        curve_enabled = bool(resolved.get("Curve_Enabled", False))
         if curve_enabled:
             for ipo_key, crs_tag in _CURVE_CHANNEL_MAP:
-                raw = adjustments.get(ipo_key)
+                raw = resolved.get(ipo_key)
                 if raw and isinstance(raw, list):
                     _write_tone_curve_seq(desc, crs_tag, raw)
                 else:
                     _write_tone_curve_seq(desc, crs_tag, [(0.0, 0.0), (1.0, 1.0)])
 
     # B&W
-    if bool(adjustments.get("BW_Enabled", False)):
+    if bool(resolved.get("BW_Enabled", False)):
         desc.set(f"{{{_NS_CRS}}}ConvertToGrayscale", "True")
 
     # Selective Color — store in ipo namespace for lossless round-trip
-    sc_enabled = bool(adjustments.get("SelectiveColor_Enabled", False))
+    sc_enabled = bool(resolved.get("SelectiveColor_Enabled", False))
     if sc_enabled:
-        ranges = adjustments.get("SelectiveColor_Ranges")
+        ranges = resolved.get("SelectiveColor_Ranges")
         if isinstance(ranges, list) and len(ranges) == NUM_RANGES:
             parts: List[str] = []
             for r in ranges:
@@ -771,7 +870,8 @@ def export_xmp(asset_path: Path, adjustments: Mapping[str, Any]) -> Path:
     """
     xmp_path = xmp_sidecar_path_for_asset(asset_path)
     xmp_path.parent.mkdir(parents=True, exist_ok=True)
-    xmp_content = ipo_to_xmp(dict(adjustments))
+    color_stats = _try_compute_color_stats(asset_path)
+    xmp_content = ipo_to_xmp(dict(adjustments), color_stats=color_stats)
     tmp_path = xmp_path.with_suffix(xmp_path.suffix + ".tmp")
     tmp_path.write_text(xmp_content, encoding="utf-8")
     try:

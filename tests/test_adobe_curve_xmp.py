@@ -147,6 +147,13 @@ class TestAdobeCurveExport:
         # With exposure=0.5, input 0 should map to something > 0
         assert red[0][1] > 0, "Exposure should lift blacks"
 
+    def test_light_master_baked_into_curve(self):
+        """Light master slider should be resolved into the baked tone curve."""
+        adj = {"Light_Master": 1.0}
+        xmp = ipo_to_xmp(adj)
+        red = self._parse_tone_curve(xmp, "ToneCurvePV2012Red")
+        assert red[0][1] > 0, "Light master should lift blacks"
+
     def test_all_params_roundtrip_losslessly(self):
         """All IPO parameters survive round-trip via ipo: namespace."""
         original = {
