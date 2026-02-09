@@ -32,7 +32,6 @@ RAW_EXTENSIONS: frozenset[str] = frozenset({
 # Register MIME types for RAW extensions that Python's mimetypes module
 # does not know about.  This ensures ``mimetypes.guess_type()`` returns a
 # useful ``image/`` type for these files rather than ``None``.
-# Module-level registration is idempotent and runs once per process.
 _RAW_MIME_MAP = {
     ".cr2": "image/x-canon-cr2",
     ".cr3": "image/x-canon-cr3",
