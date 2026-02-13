@@ -56,7 +56,7 @@ The project currently has **10 oversized files** (all exceeding 870 lines). Thes
 | 7 | `src/.../gl_renderer.py` | 940 | `GLRenderer` | 🔴 高 | 着色器/纹理/渲染管线混杂 |
 | 8 | `src/.../asset_data_source.py` | 938 | `AssetDataSource` + 4 类 | 🔴 高 | 分页/线程/缓存/移动混杂 |
 | 9 | `src/.../library/manager.py` | 909 | `LibraryManager` | 🔴 高 | 扫描/监视/树管理/地理混杂 |
-| 10 | `maps/.../map_renderer.py` | 878 | `MapRenderer` + 3 数据类 | 🟡 中 | 视口/瓦片/标注/渲染混杂 |
+| 10 | `src/maps/.../map_renderer.py` | 878 | `MapRenderer` + 3 数据类 | 🟡 中 | 视口/瓦片/标注/渲染混杂 |
 
 ---
 
@@ -835,7 +835,7 @@ class FullscreenHandler:
 
 ### 3.8 `map_renderer.py` — MapRenderer 地图渲染器
 
-**路径 / Path:** `maps/map_widget/map_renderer.py` (878 行)
+**路径 / Path:** `src/maps/map_widget/map_renderer.py` (878 行)
 
 #### 当前职责分析 / Current Responsibility Analysis
 
@@ -848,7 +848,7 @@ class FullscreenHandler:
 #### 拆分方案 / Splitting Plan
 
 ```
-maps/map_widget/
+src/maps/map_widget/
 ├── map_renderer.py               # ≈250 行 — 精简: 渲染编排
 ├── viewport.py                   # ≈100 行 — 新建: 视口状态与计算
 ├── tile_collector.py             # ≈120 行 — 新建: 瓦片收集与裁剪
