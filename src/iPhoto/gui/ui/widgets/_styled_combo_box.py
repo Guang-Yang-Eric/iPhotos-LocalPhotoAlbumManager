@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QPointF, Qt
-from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtGui import QColor, QPaintEvent, QPainter, QPen
 from PySide6.QtWidgets import QComboBox, QWidget
 
 
@@ -37,7 +37,7 @@ class StyledComboBox(QComboBox):
             }
         """)
 
-    def paintEvent(self, event) -> None:
+    def paintEvent(self, event: QPaintEvent) -> None:
         super().paintEvent(event)
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
@@ -55,4 +55,3 @@ class StyledComboBox(QComboBox):
         painter.drawLine(p1, p2)
         painter.drawLine(p2, p3)
         painter.end()
-

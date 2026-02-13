@@ -34,9 +34,6 @@ _LOGGER = logging.getLogger(__name__)
 _HANDLE_EDGE_PADDING = 8
 
 
-_StyledComboBox = StyledComboBox
-
-
 class InputLevelSliders(QWidget):
     """Interactive slider widget for setting black and white input level points."""
 
@@ -637,7 +634,7 @@ class EditCurveSection(QWidget):
         layout.setSpacing(8)
 
         # Channel selector
-        self.channel_combo = _StyledComboBox(self)
+        self.channel_combo = StyledComboBox(self)
         self.channel_combo.addItems(["RGB", "Red", "Green", "Blue"])
         self.channel_combo.currentTextChanged.connect(self._on_channel_changed)
         self.channel_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)

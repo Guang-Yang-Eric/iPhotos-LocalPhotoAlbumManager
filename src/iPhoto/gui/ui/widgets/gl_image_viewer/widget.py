@@ -47,7 +47,8 @@ from ..view_transform_controller import (
 
 from . import crop_logic
 from . import geometry
-from .loading_overlay import LoadingOverlay
+from .components import LoadingOverlay
+from .fullscreen_handler import resolve_viewer_surface_color
 from .input_handler import InputEventHandler
 from .offscreen import OffscreenRenderer
 from .resources import TextureResourceManager
@@ -55,13 +56,6 @@ from .utils import normalise_colour
 from .view_helpers import clamp_center_to_texture_bounds
 
 _LOGGER = logging.getLogger(__name__)
-
-# 如果你的工程没有这个函数，可以改成固定背景色
-try:
-    from ...palette import viewer_surface_color  # type: ignore
-except Exception:
-    def viewer_surface_color(_):  # fallback
-        return QColor(0, 0, 0)
 
 
 class GLImageViewer(QOpenGLWidget):
@@ -109,7 +103,7 @@ class GLImageViewer(QOpenGLWidget):
         # switch to a pure black canvas.  ``viewer_surface_color`` returns a
         # palette-derived colour string, which we normalise to ``QColor`` for
         # reliable comparisons and GL clear colour conversion.
-        self._default_surface_color = normalise_colour(viewer_surface_color(self))
+        self._default_surface_color = normalise_colour(resolve_viewer_surface_color(self))
         self._surface_override: QColor | None = None
         self._backdrop_color: QColor = QColor(self._default_surface_color)
         self._apply_surface_color()
