@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import shutil
-from dataclasses import dataclass
 import sqlite3
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence
@@ -30,41 +29,13 @@ from ..utils.jsonio import read_json
 from ..cache.index_store import get_global_repository
 from ..utils.logging import get_logger
 from .tree import AlbumNode
+from .geo_aggregator import GeotaggedAsset
 
 # Adjusted imports to point to the new location in library/workers
 from .workers.scanner_worker import ScannerSignals, ScannerWorker
 from .workers.rescan_worker import RescanSignals, RescanWorker
 
 LOGGER = get_logger()
-
-@dataclass(slots=True, frozen=True)
-class GeotaggedAsset:
-    """Lightweight descriptor describing an asset with GPS metadata."""
-
-    library_relative: str
-    """Relative path from the library root to the asset."""
-
-    album_relative: str
-    """Relative path from the asset's album root to the file."""
-
-    absolute_path: Path
-    """Absolute filesystem path to the asset."""
-
-    album_path: Path
-    """Root directory of the album that owns the asset."""
-
-    asset_id: str
-    """Identifier reported by the index row."""
-
-    latitude: float
-    longitude: float
-    is_image: bool
-    is_video: bool
-    still_image_time: Optional[float]
-    duration: Optional[float]
-    location_name: Optional[str]
-    """Human-readable label derived from the asset's GPS coordinate."""
-
 
 class LibraryManager(QObject):
     """Manage the Basic Library tree, file-system helpers, and scanning state."""

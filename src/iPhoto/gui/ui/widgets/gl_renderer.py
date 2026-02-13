@@ -12,7 +12,6 @@ from __future__ import annotations
 import logging
 import math
 import time
-from pathlib import Path
 from typing import Mapping, Optional
 
 import numpy as np
@@ -31,6 +30,7 @@ from shiboken6.Shiboken import VoidPtr
 
 from ....core.selective_color_resolver import NUM_RANGES, SAT_GATE_LO, SAT_GATE_HI
 
+from .gl_shader_manager import load_shader_source
 from .perspective_math import build_perspective_matrix
 
 _LOGGER = logging.getLogger(__name__)
@@ -53,16 +53,6 @@ void main() {
     FragColor = uColor;
 }
 """
-
-
-def _load_shader_source(filename: str) -> str:
-    """Return the GLSL source stored alongside this module."""
-
-    shader_path = Path(__file__).resolve().with_name(filename)
-    try:
-        return shader_path.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise RuntimeError(f"Failed to load shader '{filename}': {exc}") from exc
 
 
 class GLRenderer:
@@ -97,8 +87,8 @@ class GLRenderer:
         self.destroy_resources()
 
         program = QOpenGLShaderProgram(self._parent)
-        vert_source = _load_shader_source("gl_image_viewer.vert")
-        frag_source = _load_shader_source("gl_image_viewer.frag")
+        vert_source = load_shader_source(__file__, "gl_image_viewer.vert")
+        frag_source = load_shader_source(__file__, "gl_image_viewer.frag")
         if not program.addShaderFromSourceCode(QOpenGLShader.Vertex, vert_source):
             message = program.log()
             _LOGGER.error("Vertex shader compilation failed: %s", message)
@@ -937,4 +927,3 @@ class GLRenderer:
                 gf.glViewport(x, y, w, h)
             except Exception:
                 pass
-

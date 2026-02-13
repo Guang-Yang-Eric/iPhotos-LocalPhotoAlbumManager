@@ -47,7 +47,7 @@ from ..view_transform_controller import (
 
 from . import crop_logic
 from . import geometry
-from .components import LoadingOverlay
+from .loading_overlay import LoadingOverlay
 from .input_handler import InputEventHandler
 from .offscreen import OffscreenRenderer
 from .resources import TextureResourceManager

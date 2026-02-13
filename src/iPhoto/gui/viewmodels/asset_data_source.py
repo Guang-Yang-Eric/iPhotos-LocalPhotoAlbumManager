@@ -1,5 +1,4 @@
 from collections import OrderedDict
-from dataclasses import dataclass
 from datetime import datetime
 import os
 import re
@@ -15,23 +14,13 @@ from iPhoto.domain.repositories import IAssetRepository
 from iPhoto.application.dtos import AssetDTO
 from iPhoto.utils import image_loader
 from iPhoto.config import RECENTLY_DELETED_DIR_NAME, WORK_DIR_NAME
+from .pending_move_buffer import PendingMove
 
 THUMBNAIL_SUFFIX_RE = re.compile(r"_(\d{2,4})x(\d{2,4})(?=\.[^.]+$)", re.IGNORECASE)
 THUMBNAIL_MAX_DIMENSION = 512
 THUMBNAIL_MAX_BYTES = 350_000
 LEGACY_THUMB_DIRS = {WORK_DIR_NAME.lower(), ".photo", ".iphoto"}
 PATH_EXISTS_CACHE_LIMIT = 20_000
-
-@dataclass(frozen=True)
-class _PendingMove:
-    dto: AssetDTO
-    source_abs: Path
-    destination_root: Path
-    destination_album_path: str
-    destination_abs: Path
-    destination_rel: Path
-    is_delete: bool
-
 
 class _AssetLoadSignals(QObject):
     completed = Signal(int, list, int)
@@ -123,7 +112,7 @@ class AssetDataSource(QObject):
         self._cached_dtos: List[AssetDTO] = []
         self._total_count: int = 0
         self._page_size = 1000
-        self._pending_moves: List[_PendingMove] = []
+        self._pending_moves: List[PendingMove] = []
         self._pending_paths: set[str] = set()
         self._active_root: Optional[Path] = None
         self._seen_abs_paths: set[str] = set()
@@ -384,7 +373,7 @@ class AssetDataSource(QObject):
                 is_pano=dto.is_pano,
                 micro_thumbnail=dto.micro_thumbnail,
             )
-            pending = _PendingMove(
+            pending = PendingMove(
                 dto=moved_dto,
                 source_abs=path,
                 destination_root=destination_root,
@@ -694,7 +683,7 @@ class AssetDataSource(QObject):
             return
         updated = False
         existing_abs = {self._normalize_abs_key(dto.abs_path) for dto in self._cached_dtos}
-        remaining: List[_PendingMove] = []
+        remaining: List[PendingMove] = []
         for pending in self._pending_moves:
             if self._normalize_abs_key(pending.destination_abs) in existing_abs:
                 updated = True
@@ -882,7 +871,7 @@ class AssetDataSource(QObject):
             return False
         return True
 
-    def _should_include_pending(self, pending: _PendingMove, query: AssetQuery) -> bool:
+    def _should_include_pending(self, pending: PendingMove, query: AssetQuery) -> bool:
         if query.is_favorite is True and not pending.dto.is_favorite:
             return False
         if query.media_types:

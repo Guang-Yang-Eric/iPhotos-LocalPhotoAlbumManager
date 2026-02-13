@@ -33,6 +33,7 @@ from .edit_selective_color_section import EditSelectiveColorSection
 from .edit_levels_section import EditLevelsSection
 from .edit_perspective_controls import PerspectiveControls
 from .collapsible_section import CollapsibleSection
+from .edit_sidebar_sections import build_separator
 from ..palette import SIDEBAR_BACKGROUND_COLOR, Edit_SIDEBAR_FONT
 from ..icon import load_icon
 
@@ -672,14 +673,7 @@ class EditSidebar(QWidget):
         )
 
     def _build_separator(self, parent: QWidget) -> QFrame:
-        """Return a subtle divider separating adjacent section headers."""
-
-        separator = QFrame(parent)
-        separator.setFrameShape(QFrame.Shape.HLine)
-        separator.setFrameShadow(QFrame.Shadow.Plain)
-        separator.setStyleSheet("QFrame { background-color: palette(mid); }")
-        separator.setFixedHeight(1)
-        return separator
+        return build_separator(parent)
 
     def _on_light_reset(self) -> None:
         if self._session is None:
