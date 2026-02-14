@@ -75,7 +75,7 @@ class TextureManager:
             pixel_data = memoryview(buffer)
             bytes_per_line = qimage.bytesPerLine()
 
-            def _get_chunk_data(y_offset: int, chunk_height: int, _width: int):
+            def _get_chunk_data(y_offset: int, chunk_height: int, _chunk_width: int):
                 start = y_offset * bytes_per_line
                 end = start + chunk_height * bytes_per_line
                 return pixel_data[start:end]

@@ -48,6 +48,9 @@ gl_texture_manager_mod = load_module_from_file(
 )
 TextureManager = gl_texture_manager_mod.TextureManager
 
+Y_OFFSET_ARG_INDEX = 3
+HEIGHT_ARG_INDEX = 5
+
 
 class _Bits(bytearray):
     def setsize(self, _size):
@@ -119,8 +122,14 @@ def test_upload_texture_streams_large_images_in_chunks():
     manager.upload_texture(_FakeImage(256, 600))
 
     assert gl_texture_manager_mod.gl.glTexSubImage2D.call_count == 3
-    heights = [call.args[5] for call in gl_texture_manager_mod.gl.glTexSubImage2D.call_args_list]
-    y_offsets = [call.args[3] for call in gl_texture_manager_mod.gl.glTexSubImage2D.call_args_list]
+    heights = [
+        call.args[HEIGHT_ARG_INDEX]
+        for call in gl_texture_manager_mod.gl.glTexSubImage2D.call_args_list
+    ]
+    y_offsets = [
+        call.args[Y_OFFSET_ARG_INDEX]
+        for call in gl_texture_manager_mod.gl.glTexSubImage2D.call_args_list
+    ]
     assert heights == [256, 256, 88]
     assert y_offsets == [0, 256, 512]
 
