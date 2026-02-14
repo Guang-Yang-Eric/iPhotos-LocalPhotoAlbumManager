@@ -155,7 +155,7 @@ class MoveWorker(QRunnable):
             except IPhotoError as exc:
                 destination_index_ok = False
                 self._signals.error.emit(str(exc))
-            if self._library_root and (source_index_ok or destination_index_ok):
+            if self._library_root and source_index_ok and destination_index_ok:
                 try:
                     backend.pair(self._library_root, library_root=self._library_root)
                 except IPhotoError as exc:

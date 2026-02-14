@@ -207,7 +207,9 @@ def test_restore_repopulates_library_index(
     trashed_asset = trash_root / asset_name
     trashed_asset.write_bytes(b"stub")
 
-    def _fake_process_media_paths(root: Path, image_paths, video_paths):
+    def _fake_process_media_paths(
+        root: Path, image_paths: Iterable[Path], video_paths: Iterable[Path]
+    ):
         """Return minimal index rows keyed by their relative path."""
 
         rows = []
@@ -261,7 +263,9 @@ def test_delete_records_original_path_for_restore(
     trash_root = library_manager.ensure_deleted_directory()
     assert trash_root is not None
 
-    def _fake_process_media_paths(root: Path, image_paths, video_paths):
+    def _fake_process_media_paths(
+        root: Path, image_paths: Iterable[Path], video_paths: Iterable[Path]
+    ):
         rows = []
         for candidate in list(image_paths) + list(video_paths):
             rows.append({"rel": candidate.resolve().relative_to(root).as_posix()})
@@ -303,7 +307,10 @@ def test_move_from_library_root_updates_source_album_index(
     asset = album_a / "IMG_0100.JPG"
     asset.write_bytes(b"asset")
 
-    def _fake_process_media_paths(root: Path, image_paths, video_paths):
+    def _fake_process_media_paths(
+        root: Path, image_paths: Iterable[Path], video_paths: Iterable[Path]
+    ):
+        """Return minimal rows keyed by library-relative path."""
         rows = []
         for candidate in list(image_paths) + list(video_paths):
             rel = candidate.resolve().relative_to(root).as_posix()
@@ -356,7 +363,9 @@ def test_move_from_library_root_pairs_once(
     asset = album_a / "IMG_0101.JPG"
     asset.write_bytes(b"asset")
 
-    def _fake_process_media_paths(root: Path, image_paths, video_paths):
+    def _fake_process_media_paths(
+        root: Path, image_paths: Iterable[Path], video_paths: Iterable[Path]
+    ):
         rows = []
         for candidate in list(image_paths) + list(video_paths):
             rel = candidate.resolve().relative_to(root).as_posix()
@@ -366,6 +375,7 @@ def test_move_from_library_root_pairs_once(
     pair_calls: list[tuple[Path, dict]] = []
 
     def _fake_pair(root: Path, **kwargs):
+        """Record pair invocations for assertions."""
         pair_calls.append((root, kwargs))
         return []
 
@@ -411,7 +421,9 @@ def test_delete_collision_assigns_unique_trash_paths(
     trash_root = library_manager.ensure_deleted_directory()
     assert trash_root is not None
 
-    def _fake_process_media_paths(root: Path, image_paths, video_paths):
+    def _fake_process_media_paths(
+        root: Path, image_paths: Iterable[Path], video_paths: Iterable[Path]
+    ):
         rows = []
         for candidate in list(image_paths) + list(video_paths):
             rel = candidate.resolve().relative_to(root).as_posix()
