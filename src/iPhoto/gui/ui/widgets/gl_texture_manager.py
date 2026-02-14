@@ -71,33 +71,22 @@ class TextureManager:
         gl.glPixelStorei(gl.GL_UNPACK_ALIGNMENT, 1)
         row_length = qimage.bytesPerLine() // 4
         gl.glPixelStorei(gl.GL_UNPACK_ROW_LENGTH, row_length)
-        if height > self._streaming_uploader.chunk_height:
-            pixel_data = memoryview(buffer)
-            bytes_per_line = qimage.bytesPerLine()
+        pixel_data = memoryview(buffer)
+        bytes_per_line = qimage.bytesPerLine()
 
-            def _get_chunk_data(y_offset: int, chunk_height: int, _chunk_width: int):
-                start = y_offset * bytes_per_line
-                end = start + chunk_height * bytes_per_line
-                return pixel_data[start:end]
+        def _get_chunk_data(y_offset: int, chunk_height: int, _chunk_width: int):
+            start = y_offset * bytes_per_line
+            end = start + chunk_height * bytes_per_line
+            return pixel_data[start:end]
 
-            self._streaming_uploader.upload(
-                self._texture_id,
-                width,
-                height,
-                _get_chunk_data,
-            )
-        else:
-            gl.glTexSubImage2D(
-                gl.GL_TEXTURE_2D,
-                0,
-                0,
-                0,
-                width,
-                height,
-                gl.GL_RGBA,
-                gl.GL_UNSIGNED_BYTE,
-                buffer,
-            )
+        # Always use the same upload path so fullscreen entry is deterministic
+        # and does not branch into separate size-based rendering logic.
+        self._streaming_uploader.upload(
+            self._texture_id,
+            width,
+            height,
+            _get_chunk_data,
+        )
         gl.glPixelStorei(gl.GL_UNPACK_ROW_LENGTH, 0)
         gl.glPixelStorei(gl.GL_UNPACK_ALIGNMENT, 4)
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_LINEAR)
