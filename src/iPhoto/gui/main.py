@@ -10,8 +10,15 @@ from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication
 
 
-from iPhoto.appctx import AppContext
-from iPhoto.gui.ui.main_window import MainWindow
+try:
+    from iPhoto.appctx import AppContext
+    from iPhoto.gui.ui.main_window import MainWindow
+except ModuleNotFoundError as exc:
+    if exc.name != "iPhoto":
+        raise
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    from iPhoto.appctx import AppContext
+    from iPhoto.gui.ui.main_window import MainWindow
 
 # New Architecture Imports
 from iPhoto.di.container import DependencyContainer
