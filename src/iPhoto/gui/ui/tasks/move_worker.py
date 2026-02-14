@@ -155,6 +155,11 @@ class MoveWorker(QRunnable):
             except IPhotoError as exc:
                 destination_index_ok = False
                 self._signals.error.emit(str(exc))
+            if self._library_root and (source_index_ok or destination_index_ok):
+                try:
+                    backend.pair(self._library_root, library_root=self._library_root)
+                except IPhotoError as exc:
+                    self._signals.error.emit(str(exc))
 
         self._signals.finished.emit(
             self._source_root,
@@ -202,10 +207,8 @@ class MoveWorker(QRunnable):
         if rels:
             store.remove_rows(rels)
         
-        # Update pairing at the library root level
-        if self._library_root:
-            backend.pair(self._library_root, library_root=self._library_root)
-        else:
+        # In legacy per-album mode, pair source album immediately.
+        if not self._library_root:
             backend.pair(self._source_root)
 
     def _update_destination_index(self, moved: List[Tuple[Path, Path]]) -> None:
@@ -327,10 +330,8 @@ class MoveWorker(QRunnable):
             new_rows = annotated_rows
         store.append_rows(new_rows)
         
-        # Update pairing at the library root level
-        if self._library_root:
-            backend.pair(self._library_root, library_root=self._library_root)
-        else:
+        # In legacy per-album mode, pair destination album immediately.
+        if not self._library_root:
             backend.pair(self._destination_root)
 
         # No longer need to sync separate library index since we use single global DB

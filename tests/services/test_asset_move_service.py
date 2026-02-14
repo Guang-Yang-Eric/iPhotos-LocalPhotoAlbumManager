@@ -341,6 +341,53 @@ def test_move_from_library_root_updates_source_album_index(
     assert album_b_rows[0]["rel"] == asset.name
 
 
+def test_move_from_library_root_pairs_once(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Library-root move should trigger one consolidated pairing call."""
+
+    library_root = tmp_path / "Library"
+    album_a = library_root / "AlbumA"
+    album_b = library_root / "AlbumB"
+    library_root.mkdir()
+    album_a.mkdir(parents=True)
+    album_b.mkdir(parents=True)
+
+    asset = album_a / "IMG_0101.JPG"
+    asset.write_bytes(b"asset")
+
+    def _fake_process_media_paths(root: Path, image_paths, video_paths):
+        rows = []
+        for candidate in list(image_paths) + list(video_paths):
+            rel = candidate.resolve().relative_to(root).as_posix()
+            rows.append({"rel": rel})
+        return rows
+
+    pair_calls: list[tuple[Path, dict]] = []
+
+    def _fake_pair(root: Path, **kwargs):
+        pair_calls.append((root, kwargs))
+        return []
+
+    monkeypatch.setattr(move_worker_module, "process_media_paths", _fake_process_media_paths)
+    monkeypatch.setattr(move_worker_module.backend, "pair", _fake_pair)
+
+    signals = MoveSignals()
+    worker = MoveWorker(
+        [asset],
+        library_root,
+        album_b,
+        signals,
+        library_root=library_root,
+    )
+
+    worker.run()
+
+    assert len(pair_calls) == 1
+    assert pair_calls[0][0] == library_root
+    assert pair_calls[0][1].get("library_root") == library_root
+
+
 def test_delete_collision_assigns_unique_trash_paths(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
