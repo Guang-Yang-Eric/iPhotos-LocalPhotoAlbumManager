@@ -182,6 +182,8 @@ def scan_album(
 
         while True:
             # ── Phase 1: collect files from discovery queue ──
+            # Use a short timeout so we check the result queue frequently,
+            # keeping the streaming cadence tight.
             while not done_discovery:
                 try:
                     p = path_queue.get(timeout=0.05)
