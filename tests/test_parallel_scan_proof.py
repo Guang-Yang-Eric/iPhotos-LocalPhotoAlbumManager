@@ -13,6 +13,7 @@ import pytest
 
 from iPhoto.application.services.parallel_scanner import ParallelScanner, ScanResult
 from iPhoto.domain.models.core import Asset, MediaType
+import iPhoto.io.scanner_adapter as _sa_mod
 
 
 # ---------------------------------------------------------------------------
@@ -84,7 +85,6 @@ class TestScanAlbumParallelBatches:
     def test_multiple_threads_for_batches(self, tmp_path: Path):
         """Create >100 files so multiple batches are created, then verify
         that more than one ScanWorker thread processed them."""
-        # Create 120 media files to trigger at least 2 batches of 50
         for i in range(120):
             (tmp_path / f"photo_{i:04d}.jpg").write_text("x" * 100)
 
@@ -106,13 +106,11 @@ class TestScanAlbumParallelBatches:
                     "media_type": 0,
                 }
 
-        with patch(
-            "iPhoto.io.scanner_adapter.process_media_paths",
+        with patch.object(
+            _sa_mod, "process_media_paths",
             side_effect=_tracking_process,
         ):
-            from iPhoto.io.scanner_adapter import scan_album
-
-            rows = list(scan_album(
+            rows = list(_sa_mod.scan_album(
                 tmp_path,
                 ["*.jpg"],
                 [],
@@ -140,14 +138,12 @@ class TestScanAlbumParallelBatches:
                     "media_type": 0,
                 }
 
-        with patch(
-            "iPhoto.io.scanner_adapter.process_media_paths",
+        with patch.object(
+            _sa_mod, "process_media_paths",
             side_effect=_fake_process,
         ):
-            from iPhoto.io.scanner_adapter import scan_album
-
             with caplog.at_level(logging.INFO, logger="iPhoto.scanner"):
-                rows = list(scan_album(tmp_path, ["*.jpg"], [], num_workers=2))
+                rows = list(_sa_mod.scan_album(tmp_path, ["*.jpg"], [], num_workers=2))
 
         log_text = caplog.text
         assert "Parallel scan started" in log_text

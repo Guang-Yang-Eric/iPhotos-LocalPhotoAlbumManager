@@ -39,6 +39,7 @@ class AssetListViewModel(QAbstractListModel):
 
         # Connect signals
         self._data_source.dataChanged.connect(self._on_source_changed)
+        self._data_source.chunkedDtosReady.connect(self._on_scan_dtos_ready)
         self._thumbnails.thumbnailReady.connect(self._on_thumbnail_ready)
         # Track the last observed asset signature; None means no prior snapshot yet.
         self._last_snapshot: Optional[tuple[int, bytes]] = None
@@ -229,6 +230,24 @@ class AssetListViewModel(QAbstractListModel):
         self.beginResetModel()
         self.endResetModel()
         self._last_snapshot = current_snapshot
+
+    def _on_scan_dtos_ready(self, dtos: list) -> None:
+        """Handle incremental scan-chunk insertions.
+
+        Uses ``beginInsertRows`` / ``endInsertRows`` instead of the expensive
+        ``beginResetModel`` / ``endResetModel`` path so the view only needs to
+        lay out the newly added rows.  This keeps the UI responsive even when
+        hundreds of chunks stream in during a large scan.
+        """
+        if not dtos:
+            return
+        first = self.rowCount()
+        last = first + len(dtos) - 1
+        self.beginInsertRows(QModelIndex(), first, last)
+        self._data_source.append_dtos(dtos)
+        self.endInsertRows()
+        # Invalidate snapshot so the next full _on_source_changed recomputes.
+        self._last_snapshot = None
 
     def _on_thumbnail_ready(self, path: Path):
         # Find index for path and emit dataChanged

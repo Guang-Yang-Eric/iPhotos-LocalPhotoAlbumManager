@@ -89,11 +89,15 @@ def scan_album(
     File discovery runs in a background thread.  Discovered files are grouped
     into batches of *BATCH_SIZE* and submitted to a :class:`ThreadPoolExecutor`
     with *num_workers* threads so that metadata extraction and thumbnail
-    generation happen concurrently.  Results are yielded to the caller as
-    each batch completes.
+    generation happen concurrently.
+
+    Results stream through a thread-safe queue so individual rows are yielded
+    as soon as each file is processed — not when an entire batch completes.
+    This keeps the downstream :class:`ScannerWorker` emitting ``chunkReady``
+    signals at a steady cadence and the UI responsive.
     """
 
-    BATCH_SIZE = 50
+    BATCH_SIZE = 10
     scan_start = time.monotonic()
 
     _scan_logger.info(
@@ -114,12 +118,20 @@ def scan_album(
     thread_stats: Dict[str, int] = {}
     _stats_lock = threading.Lock()
 
-    def _process_batch(paths: List[Path]) -> List[Dict[str, Any]]:
-        """Process a batch of files on a worker thread. Returns list of rows."""
+    # Thread-safe queue where worker threads push individual result rows.
+    # The main generator yields from this queue, giving truly streaming output.
+    result_queue: queue.Queue = queue.Queue()
+
+    def _process_batch(paths: List[Path]) -> None:
+        """Process a batch of files on a worker thread.
+
+        Individual result rows are pushed to *result_queue* as soon as they
+        are ready so the main generator can yield them promptly.
+        """
         t_name = threading.current_thread().name
         t_start = time.monotonic()
-        results: List[Dict[str, Any]] = []
         cached_count = 0
+        new_count = 0
 
         to_process: List[Path] = []
         for p in paths:
@@ -136,7 +148,7 @@ def scan_album(
                     current_ts = int(st.st_mtime * 1_000_000)
                     if (hit.get("bytes") == st.st_size
                             and abs((cached_ts or 0) - current_ts) <= 1_000_000):
-                        results.append(hit)
+                        result_queue.put(hit)
                         cached_count += 1
                         continue
                 except OSError:
@@ -145,21 +157,21 @@ def scan_album(
 
         if to_process:
             for row in process_media_paths(root, to_process, []):
-                results.append(row)
+                result_queue.put(row)
+                new_count += 1
 
         dt = time.monotonic() - t_start
         with _stats_lock:
             thread_stats[t_name] = thread_stats.get(t_name, 0) + len(paths)
         _scan_logger.info(
             "  [%s] batch: %d files (%d cached + %d new) → %.3fs",
-            t_name, len(paths), cached_count, len(to_process), dt,
+            t_name, len(paths), cached_count, new_count, dt,
         )
-        return results
 
     executor = ThreadPoolExecutor(
         max_workers=num_workers, thread_name_prefix="ScanWorker",
     )
-    pending: Dict[Any, int] = {}   # future → batch file count
+    pending_futures: set = set()
 
     try:
         if progress_callback:
@@ -167,13 +179,12 @@ def scan_album(
 
         batch: List[Path] = []
         done_discovery = False
-        total_processed = 0
 
         while True:
             # ── Phase 1: collect files from discovery queue ──
             while not done_discovery:
                 try:
-                    p = path_queue.get(timeout=0.1)
+                    p = path_queue.get(timeout=0.05)
                 except queue.Empty:
                     if not discoverer.is_alive():
                         done_discovery = True
@@ -188,26 +199,44 @@ def scan_album(
             # ── Phase 2: submit ready batch to thread pool ──
             if len(batch) >= BATCH_SIZE or (done_discovery and batch):
                 fut = executor.submit(_process_batch, list(batch))
-                pending[fut] = len(batch)
+                pending_futures.add(fut)
                 batches_submitted += 1
                 batch = []
 
-            # ── Phase 3: yield completed results ──
-            completed = [f for f in pending if f.done()]
-            for f in completed:
-                n = pending.pop(f)
+            # ── Phase 3: yield results that workers have streamed ──
+            drained = 0
+            while True:
                 try:
-                    for row in f.result():
-                        yield row
-                        total_yielded += 1
+                    row = result_queue.get_nowait()
+                    yield row
+                    total_yielded += 1
+                    drained += 1
+                except queue.Empty:
+                    break
+
+            # Clean up completed futures (and propagate exceptions)
+            completed = {f for f in pending_futures if f.done()}
+            for f in completed:
+                try:
+                    f.result()
                 except Exception as exc:
                     _scan_logger.error("Batch processing failed: %s", exc)
-                total_processed += n
-                if progress_callback:
-                    progress_callback(total_processed, discoverer.total_found)
+            pending_futures -= completed
+
+            if progress_callback and drained > 0:
+                progress_callback(total_yielded, discoverer.total_found)
 
             # ── exit when all work is done ──
-            if done_discovery and not pending and not batch:
+            if done_discovery and not pending_futures and not batch:
+                # Final drain — workers may have pushed items between our
+                # last drain and the future-completion check.
+                while True:
+                    try:
+                        row = result_queue.get_nowait()
+                        yield row
+                        total_yielded += 1
+                    except queue.Empty:
+                        break
                 break
 
     finally:

@@ -51,6 +51,7 @@ class AssetDataSource(QObject):
     """
 
     dataChanged = Signal()
+    chunkedDtosReady = Signal(list)
 
     def __init__(self, repository: IAssetRepository, library_root: Optional[Path] = None):
         super().__init__()
@@ -342,9 +343,11 @@ class AssetDataSource(QObject):
         if not appended:
             return
 
-        self.append_dtos(appended)
-        self._total_count = len(self._cached_dtos)
-        self.dataChanged.emit()
+        # Emit the prepared DTOs for the ViewModel to insert incrementally
+        # using beginInsertRows/endInsertRows (much cheaper than a full
+        # model reset).  The ViewModel handler calls append_dtos() between
+        # begin/endInsertRows so the data is inserted at the right time.
+        self.chunkedDtosReady.emit(appended)
 
     def _resolve_view_rel(
         self,
