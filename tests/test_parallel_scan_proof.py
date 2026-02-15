@@ -104,7 +104,6 @@ class TestScanAlbumParallelWorkers:
             return [{"SourceFile": p.as_posix()} for p in paths]
 
         with patch.object(_sa_mod._metadata_provider, "normalize_metadata", side_effect=_fake_normalize), \
-             patch.object(_sa_mod._metadata_provider, "get_metadata_batch", side_effect=_fake_et_batch), \
              patch("iPhoto.io.scanner_adapter.get_exiftool_pool") as mock_pool:
 
             # Create a fake pool that returns a mock exiftool instance

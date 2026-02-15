@@ -140,8 +140,6 @@ class _MetadataWorkerThread(threading.Thread):
             except queue.Empty:
                 continue
             if batch is None:
-                # Sentinel — re-put so siblings also stop
-                self._path_queue.put(None)
                 break
             self._process_batch(et, batch)
 
@@ -329,8 +327,9 @@ def scan_album(
             if done_discovery and not batch:
                 if work_queue.empty():
                     # All work has been submitted and picked up.
-                    # Send stop sentinel and wait for workers to finish.
-                    work_queue.put(None)
+                    # Send one sentinel per worker so each exits cleanly.
+                    for _ in range(num_workers):
+                        work_queue.put(None)
                     for w in workers:
                         w.join(timeout=5.0)
                     # Final drain
@@ -346,7 +345,8 @@ def scan_album(
     finally:
         # Signal workers to stop
         stop_event.set()
-        work_queue.put(None)
+        for _ in range(num_workers):
+            work_queue.put(None)
 
         # Wait for workers to finish
         for w in workers:

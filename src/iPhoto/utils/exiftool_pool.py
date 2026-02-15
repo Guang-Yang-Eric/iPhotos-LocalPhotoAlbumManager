@@ -201,6 +201,7 @@ class ExifToolPool:
         self._tools: List[PersistentExifTool] = [PersistentExifTool() for _ in range(size)]
         self._queue: Queue[PersistentExifTool] = Queue()
         self._started = False
+        self._atexit_registered = False
 
     @property
     def size(self) -> int:
@@ -217,7 +218,9 @@ class ExifToolPool:
             except ExternalToolError:
                 _logger.warning("Failed to start an exiftool instance")
             self._queue.put(tool)
-        atexit.register(self.shutdown)
+        if not self._atexit_registered:
+            self._atexit_registered = True
+            atexit.register(self.shutdown)
 
     def get(self, timeout: float = 30.0) -> PersistentExifTool:
         """Borrow an exiftool instance (blocks until one is available)."""
