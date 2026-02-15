@@ -38,6 +38,9 @@ class ApplyEditUseCase(UseCase):
             if result is None:
                 return ApplyEditResponse(success=False, error="Render returned no result")
 
+            if not callable(getattr(result, "save", None)):
+                return ApplyEditResponse(success=False, error="Render result does not support save()")
+
             output = request.output_path or request.asset_path.with_suffix(".edited.jpg")
             result.save(str(output), "JPG", DEFAULT_JPEG_QUALITY)
             return ApplyEditResponse(output_path=str(output))

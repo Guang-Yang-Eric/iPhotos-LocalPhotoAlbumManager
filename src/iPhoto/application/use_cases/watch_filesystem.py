@@ -34,7 +34,10 @@ class WatchFilesystemUseCase(UseCase):
                 self._watcher.resume_watcher()
                 return WatchFilesystemResponse(is_paused=False)
             elif request.action == "rebuild":
-                self._watcher._rebuild_watches()
+                if hasattr(self._watcher, "rebuild_watches"):
+                    self._watcher.rebuild_watches()
+                elif hasattr(self._watcher, "_rebuild_watches"):
+                    self._watcher._rebuild_watches()
                 return WatchFilesystemResponse()
             elif request.action == "status":
                 return WatchFilesystemResponse()

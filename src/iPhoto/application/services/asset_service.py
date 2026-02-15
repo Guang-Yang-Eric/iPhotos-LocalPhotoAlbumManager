@@ -47,7 +47,10 @@ class AssetService:
             try:
                 self._weak_cache.put(asset_id, asset)
             except TypeError:
-                pass  # Asset type may not support weak references
+                self._logger.debug(
+                    "Cannot cache asset %s: type does not support weak references",
+                    asset_id,
+                )
         return asset
 
     def toggle_favorite(self, asset_id: str) -> bool:
