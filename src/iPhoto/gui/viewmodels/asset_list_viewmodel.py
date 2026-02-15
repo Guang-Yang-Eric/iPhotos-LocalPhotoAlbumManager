@@ -255,7 +255,7 @@ class AssetListViewModel(QAbstractListModel):
         10-item chunk (which can overwhelm the event loop when hundreds of
         chunks arrive in quick succession), we accumulate DTOs in a buffer
         and flush them to the model at most once every
-        :pyattr:`_SCAN_FLUSH_INTERVAL_MS` milliseconds.  This batches many
+        :py:attr:`_SCAN_FLUSH_INTERVAL_MS` milliseconds.  This batches many
         small chunks into a single model update, keeping the UI responsive
         and allowing the event loop to process user interactions between
         flushes.
