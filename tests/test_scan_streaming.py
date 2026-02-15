@@ -1,5 +1,5 @@
-"""Tests verifying that scan results stream incrementally and the
-ViewModel uses efficient beginInsertRows instead of full model resets.
+"""Tests verifying that scan results stream incrementally via batch yields
+and the ViewModel's chunkedDtosReady signal routes correctly.
 """
 
 from __future__ import annotations

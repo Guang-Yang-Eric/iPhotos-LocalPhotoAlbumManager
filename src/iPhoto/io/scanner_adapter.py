@@ -70,7 +70,14 @@ def scan_album(
     existing_index: Optional[Dict[str, Dict[str, Any]]] = None,
     progress_callback: Optional[Callable[[int, int], None]] = None,
 ) -> Iterator[Dict[str, Any]]:
-    """Yield index rows for all matching assets in *root*, scanning in parallel."""
+    """Yield index rows for all matching assets in *root*.
+
+    File discovery runs in a background thread.  Discovered files are batched
+    and processed sequentially via :func:`process_media_paths`.  Results are
+    yielded as each batch completes, keeping the downstream
+    :class:`ScannerWorker` emitting ``chunkReady`` signals at a steady cadence
+    and the UI responsive.
+    """
 
     path_queue = queue.Queue(maxsize=1000)
     # FileDiscoveryThread expects list, ensure we pass lists
@@ -110,8 +117,6 @@ def scan_album(
 
         # Process remaining
         if paths_to_process:
-             # Reuse process_media_paths logic but we need to split images/videos if we strictly followed signature,
-             # but process_media_paths just joins them.
              yield from process_media_paths(root, paths_to_process, [])
 
     try:
