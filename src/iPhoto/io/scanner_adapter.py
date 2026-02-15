@@ -1,13 +1,5 @@
-"""Adapter to bridge legacy scanner calls to the new infrastructure.
+"""Adapter to bridge legacy scanner calls to the new infrastructure."""
 
-The :func:`scan_album` generator discovers media files in a background thread
-and processes metadata + thumbnails in parallel via a :class:`ThreadPoolExecutor`.
-"""
-
-import logging
-import threading
-import time
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Iterator, Dict, Any, List, Optional, Callable, Iterable
 import queue
@@ -21,11 +13,6 @@ from ..infrastructure.services.thumbnail_generator import PillowThumbnailGenerat
 from ..utils.pathutils import should_include
 from ..config import DEFAULT_INCLUDE, DEFAULT_EXCLUDE
 from ..application.use_cases.scan_album import FileDiscoveryThread
-
-_scan_logger = logging.getLogger("iPhoto.scanner")
-
-# Default number of parallel worker threads for batch processing.
-_NUM_WORKERS = 4
 
 # Instantiate services directly for the adapter (stateless)
 _metadata_provider = ExifToolMetadataProvider()
@@ -82,185 +69,90 @@ def scan_album(
     exclude_globs: Iterable[str],
     existing_index: Optional[Dict[str, Dict[str, Any]]] = None,
     progress_callback: Optional[Callable[[int, int], None]] = None,
-    num_workers: int = _NUM_WORKERS,
 ) -> Iterator[Dict[str, Any]]:
-    """Yield index rows for all matching assets in *root*, scanning in parallel.
+    """Yield index rows for all matching assets in *root*, scanning in parallel."""
 
-    File discovery runs in a background thread.  Discovered files are grouped
-    into batches of *BATCH_SIZE* and submitted to a :class:`ThreadPoolExecutor`
-    with *num_workers* threads so that metadata extraction and thumbnail
-    generation happen concurrently.
-
-    Results stream through a thread-safe queue so individual rows are yielded
-    as soon as each file is processed — not when an entire batch completes.
-    This keeps the downstream :class:`ScannerWorker` emitting ``chunkReady``
-    signals at a steady cadence and the UI responsive.
-    """
-
-    BATCH_SIZE = 10
-    scan_start = time.monotonic()
-
-    _scan_logger.info(
-        "▶ Parallel scan started: %s (workers=%d, batch_size=%d)",
-        root.name, num_workers, BATCH_SIZE,
-    )
-
-    path_queue: queue.Queue = queue.Queue(maxsize=1000)
-    discoverer = FileDiscoveryThread(
-        root, path_queue,
-        include=list(include_globs),
-        exclude=list(exclude_globs),
-    )
+    path_queue = queue.Queue(maxsize=1000)
+    # FileDiscoveryThread expects list, ensure we pass lists
+    discoverer = FileDiscoveryThread(root, path_queue, include=list(include_globs), exclude=list(exclude_globs))
     discoverer.start()
 
-    total_yielded = 0
-    batches_submitted = 0
-    thread_stats: Dict[str, int] = {}
-    _stats_lock = threading.Lock()
+    batch = []
+    BATCH_SIZE = 50
+    total_processed = 0
 
-    # Thread-safe queue where worker threads push individual result rows.
-    # The main generator yields from this queue, giving truly streaming output.
-    result_queue: queue.Queue = queue.Queue()
-
-    def _process_batch(paths: List[Path]) -> None:
-        """Process a batch of files on a worker thread.
-
-        Individual result rows are pushed to *result_queue* as soon as they
-        are ready so the main generator can yield them promptly.
-        """
-        t_name = threading.current_thread().name
-        t_start = time.monotonic()
-        cached_count = 0
-        new_count = 0
-
-        to_process: List[Path] = []
+    def process_batch_rows(paths: List[Path]) -> Iterator[Dict[str, Any]]:
+        # Check cache first to avoid expensive metadata extraction
+        paths_to_process = []
         for p in paths:
             rel = p.relative_to(root).as_posix()
-            hit = None
+
+            # Check existing index
+            cached = None
             if existing_index:
-                hit = existing_index.get(rel)
-                if not hit:
-                    hit = existing_index.get(unicodedata.normalize('NFC', rel))
-            if hit:
+                cached = existing_index.get(rel)
+                if not cached:
+                    cached = existing_index.get(unicodedata.normalize('NFC', rel))
+
+            if cached:
                 try:
-                    st = p.stat()
-                    cached_ts = hit.get("ts")
-                    current_ts = int(st.st_mtime * 1_000_000)
-                    if (hit.get("bytes") == st.st_size
-                            and abs((cached_ts or 0) - current_ts) <= 1_000_000):
-                        result_queue.put(hit)
-                        cached_count += 1
+                    stat = p.stat()
+                    # Validate cache
+                    cached_ts = cached.get("ts")
+                    current_ts = int(stat.st_mtime * 1_000_000)
+                    if cached.get("bytes") == stat.st_size and abs((cached_ts or 0) - current_ts) <= 1_000_000:
+                        yield cached
                         continue
                 except OSError:
                     pass
-            to_process.append(p)
 
-        if to_process:
-            for row in process_media_paths(root, to_process, []):
-                result_queue.put(row)
-                new_count += 1
+            paths_to_process.append(p)
 
-        dt = time.monotonic() - t_start
-        with _stats_lock:
-            thread_stats[t_name] = thread_stats.get(t_name, 0) + len(paths)
-        _scan_logger.info(
-            "  [%s] batch: %d files (%d cached + %d new) → %.3fs",
-            t_name, len(paths), cached_count, new_count, dt,
-        )
-
-    executor = ThreadPoolExecutor(
-        max_workers=num_workers, thread_name_prefix="ScanWorker",
-    )
-    pending_futures: set = set()
+        # Process remaining
+        if paths_to_process:
+             # Reuse process_media_paths logic but we need to split images/videos if we strictly followed signature,
+             # but process_media_paths just joins them.
+             yield from process_media_paths(root, paths_to_process, [])
 
     try:
         if progress_callback:
             progress_callback(0, 0)
 
-        batch: List[Path] = []
-        done_discovery = False
-
         while True:
-            # ── Phase 1: collect files from discovery queue ──
-            # Use a short timeout so we check the result queue frequently,
-            # keeping the streaming cadence tight.
-            while not done_discovery:
-                try:
-                    p = path_queue.get(timeout=0.05)
-                except queue.Empty:
-                    if not discoverer.is_alive():
-                        done_discovery = True
+            try:
+                path = path_queue.get(timeout=0.5)
+            except queue.Empty:
+                if not discoverer.is_alive():
                     break
-                if p is None:
-                    done_discovery = True
-                    break
-                batch.append(p)
-                if len(batch) >= BATCH_SIZE:
-                    break
+                continue
 
-            # ── Phase 2: submit ready batch to thread pool ──
-            if len(batch) >= BATCH_SIZE or (done_discovery and batch):
-                fut = executor.submit(_process_batch, list(batch))
-                pending_futures.add(fut)
-                batches_submitted += 1
-                batch = []
-
-            # ── Phase 3: yield results that workers have streamed ──
-            drained = 0
-            while True:
-                try:
-                    row = result_queue.get_nowait()
-                    yield row
-                    total_yielded += 1
-                    drained += 1
-                except queue.Empty:
-                    break
-
-            # Clean up completed futures (and propagate exceptions)
-            completed = {f for f in pending_futures if f.done()}
-            for f in completed:
-                try:
-                    f.result()
-                except Exception as exc:
-                    _scan_logger.error("Batch processing failed: %s", exc)
-            pending_futures -= completed
-
-            if progress_callback and drained > 0:
-                progress_callback(total_yielded, discoverer.total_found)
-
-            # ── exit when all work is done ──
-            if done_discovery and not pending_futures and not batch:
-                # Final drain — workers may have pushed items between our
-                # last drain and the future-completion check.
-                while True:
-                    try:
-                        row = result_queue.get_nowait()
-                        yield row
-                        total_yielded += 1
-                    except queue.Empty:
-                        break
+            if path is None:
                 break
 
-    finally:
-        executor.shutdown(wait=False, cancel_futures=True)
+            batch.append(path)
+            if len(batch) >= BATCH_SIZE:
+                yield from process_batch_rows(batch)
+                total_processed += len(batch)
+                if progress_callback:
+                    progress_callback(total_processed, discoverer.total_found)
+                batch = []
 
+        if batch:
+            yield from process_batch_rows(batch)
+            total_processed += len(batch)
+            if progress_callback:
+                progress_callback(total_processed, discoverer.total_found)
+
+    finally:
+        # Cleanup logic similar to original scanner
         discoverer.stop()
-        # Drain queue so discovery thread can unblock from put()
+
+        # Drain queue to allow thread to unblock if it was stuck on put()
         while True:
             try:
                 path_queue.get(timeout=0.1)
             except queue.Empty:
                 if not discoverer.is_alive():
                     break
-        discoverer.join(timeout=1.0)
 
-        elapsed = time.monotonic() - scan_start
-        if thread_stats:
-            _scan_logger.info("── Per-thread work distribution ──")
-            for tname, count in sorted(thread_stats.items()):
-                _scan_logger.info("  %-20s : %4d files", tname, count)
-        _scan_logger.info(
-            "◀ Parallel scan complete: %d discovered → %d yielded, "
-            "%d batches, %.2fs total",
-            discoverer.total_found, total_yielded, batches_submitted, elapsed,
-        )
+        discoverer.join(timeout=1.0)

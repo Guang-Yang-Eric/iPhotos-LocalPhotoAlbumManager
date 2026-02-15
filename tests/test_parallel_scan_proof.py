@@ -1,4 +1,5 @@
-"""Tests proving that scan_album and ParallelScanner use multiple threads."""
+"""Tests proving that ParallelScanner uses multiple threads and
+scan_album correctly yields all discovered files."""
 
 from __future__ import annotations
 
@@ -76,27 +77,18 @@ class TestParallelScannerThreading:
 
 
 # ---------------------------------------------------------------------------
-# scan_album: prove parallel batch processing
+# scan_album: prove sequential batch processing with streaming results
 # ---------------------------------------------------------------------------
 
-class TestScanAlbumParallelBatches:
-    """Prove that scan_album processes batches on multiple threads."""
+class TestScanAlbumBatches:
+    """Prove that scan_album processes batches and yields results incrementally."""
 
-    def test_multiple_threads_for_batches(self, tmp_path: Path):
-        """Create >100 files so multiple batches are created, then verify
-        that more than one ScanWorker thread processed them."""
-        for i in range(120):
+    def test_all_files_yielded(self, tmp_path: Path):
+        """Create files and verify all are yielded from scan_album."""
+        for i in range(25):
             (tmp_path / f"photo_{i:04d}.jpg").write_text("x" * 100)
 
-        observed_threads: Set[str] = set()
-        lock = threading.Lock()
-
-        def _tracking_process(root, image_paths, video_paths):
-            """Wrapper that records the thread before delegating."""
-            with lock:
-                observed_threads.add(threading.current_thread().name)
-            time.sleep(0.1)  # simulate I/O to create overlap
-            # Yield simple rows instead of calling exiftool
+        def _fake_process(root, image_paths, video_paths):
             for p in image_paths + video_paths:
                 yield {
                     "rel": p.relative_to(root).as_posix(),
@@ -108,44 +100,43 @@ class TestScanAlbumParallelBatches:
 
         with patch.object(
             _sa_mod, "process_media_paths",
-            side_effect=_tracking_process,
-        ):
-            rows = list(_sa_mod.scan_album(
-                tmp_path,
-                ["*.jpg"],
-                [],
-                num_workers=4,
-            ))
-
-        assert len(rows) == 120
-        # Batches should have run on separate ScanWorker threads
-        assert len(observed_threads) > 1, (
-            f"Expected multiple threads, got: {observed_threads}"
-        )
-
-    def test_scan_album_log_output(self, tmp_path: Path, caplog):
-        """Verify that scan_album logs parallel scan start/complete messages."""
-        for i in range(5):
-            (tmp_path / f"img{i}.jpg").write_text("data")
-
-        def _fake_process(root, image_paths, video_paths):
-            for p in image_paths + video_paths:
-                yield {
-                    "rel": p.relative_to(root).as_posix(),
-                    "bytes": 4,
-                    "ts": 0,
-                    "id": f"as_{p.name}",
-                    "media_type": 0,
-                }
-
-        with patch.object(
-            _sa_mod, "process_media_paths",
             side_effect=_fake_process,
         ):
-            with caplog.at_level(logging.INFO, logger="iPhoto.scanner"):
-                rows = list(_sa_mod.scan_album(tmp_path, ["*.jpg"], [], num_workers=2))
+            rows = list(_sa_mod.scan_album(tmp_path, ["*.jpg"], []))
 
-        log_text = caplog.text
-        assert "Parallel scan started" in log_text
-        assert "Parallel scan complete" in log_text
-        assert "workers=2" in log_text
+        assert len(rows) == 25
+
+    def test_cached_items_bypass_processing(self, tmp_path: Path):
+        """Cached items should be yielded without calling process_media_paths."""
+        for i in range(10):
+            p = tmp_path / f"img_{i:03d}.jpg"
+            p.write_text("x" * 10)
+
+        existing_index = {}
+        for i in range(10):
+            p = tmp_path / f"img_{i:03d}.jpg"
+            st = p.stat()
+            existing_index[f"img_{i:03d}.jpg"] = {
+                "rel": f"img_{i:03d}.jpg",
+                "bytes": st.st_size,
+                "ts": int(st.st_mtime * 1_000_000),
+                "id": f"as_img_{i:03d}",
+                "media_type": 0,
+            }
+
+        call_count = 0
+        original = _sa_mod.process_media_paths
+
+        def _counting_process(root, image_paths, video_paths):
+            nonlocal call_count
+            call_count += 1
+            yield from original(root, image_paths, video_paths)
+
+        with patch.object(_sa_mod, "process_media_paths", side_effect=_counting_process):
+            rows = list(_sa_mod.scan_album(
+                tmp_path, ["*.jpg"], [],
+                existing_index=existing_index,
+            ))
+
+        assert len(rows) == 10
+        assert call_count == 0, "Cached items should not trigger metadata extraction"
