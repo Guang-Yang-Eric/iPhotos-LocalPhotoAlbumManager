@@ -91,8 +91,6 @@ class TestScanAlbumParallelBatches:
         observed_threads: Set[str] = set()
         lock = threading.Lock()
 
-        original_process = None  # will be set via patching
-
         def _tracking_process(root, image_paths, video_paths):
             """Wrapper that records the thread before delegating."""
             with lock:
