@@ -18,11 +18,13 @@ class AssetService:
         import_uc=None,
         move_uc=None,
         metadata_uc=None,
+        weak_cache=None,
     ):
         self._repo = asset_repo
         self._import_uc = import_uc
         self._move_uc = move_uc
         self._metadata_uc = metadata_uc
+        self._weak_cache = weak_cache
         self._logger = logging.getLogger(__name__)
 
     def set_repository(self, repo: IAssetRepository) -> None:
@@ -35,7 +37,18 @@ class AssetService:
         return self._repo.count(query)
 
     def get_asset(self, asset_id: str) -> Optional[Asset]:
-        return self._repo.get(asset_id)
+        # Check weak cache first
+        if self._weak_cache is not None:
+            cached = self._weak_cache.get(asset_id)
+            if cached is not None:
+                return cached
+        asset = self._repo.get(asset_id)
+        if asset is not None and self._weak_cache is not None:
+            try:
+                self._weak_cache.put(asset_id, asset)
+            except TypeError:
+                pass  # Asset type may not support weak references
+        return asset
 
     def toggle_favorite(self, asset_id: str) -> bool:
         """Toggles the favorite status of an asset."""

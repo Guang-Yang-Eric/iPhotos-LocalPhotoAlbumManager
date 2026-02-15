@@ -24,11 +24,13 @@ class GenerateThumbnailUseCase(UseCase):
         album_repo: IAlbumRepository,
         thumbnail_generator: IThumbnailGenerator,
         event_bus: EventBus,
+        thumbnail_service=None,
     ):
         self._asset_repo = asset_repo
         self._album_repo = album_repo
         self._thumbnail_gen = thumbnail_generator
         self._event_bus = event_bus
+        self._thumbnail_service = thumbnail_service
         self._logger = logging.getLogger(__name__)
 
     def execute(self, request: GenerateThumbnailRequest) -> GenerateThumbnailResponse:
@@ -41,6 +43,18 @@ class GenerateThumbnailUseCase(UseCase):
             return GenerateThumbnailResponse(success=False, error="Album not found")
         
         abs_path = album.path / asset.path
+
+        # Try three-tier ThumbnailService first if available
+        if self._thumbnail_service is not None:
+            cached = self._thumbnail_service.get_thumbnail(request.asset_id)
+            if cached is not None:
+                self._event_bus.publish(ThumbnailReadyEvent(
+                    asset_id=asset.id,
+                    thumbnail_path=str(abs_path),
+                ))
+                return GenerateThumbnailResponse(thumbnail_data=str(len(cached)))
+
+        # Fallback to direct generation
         thumb = self._thumbnail_gen.generate_micro_thumbnail(abs_path)
         
         if thumb:
