@@ -11,7 +11,7 @@ from ...cache.lock import FileLock
 from ...config import WORK_DIR_NAME
 from ...core.pairing import pair_live
 from ...errors import IndexCorruptedError, ManifestInvalidError
-from ...models.types import LiveGroup
+from ...domain.models.core import LiveGroup
 from ...utils.jsonio import read_json, write_json
 from ...utils.logging import get_logger
 from .path_normalizer import PathNormalizer

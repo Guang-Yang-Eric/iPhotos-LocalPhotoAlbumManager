@@ -61,3 +61,14 @@ class Album:
             title=title or path.name,
             created_at=datetime.now()
         )
+
+
+@dataclass(slots=True)
+class LiveGroup:
+    """Live Photo pairing — migrated from models.types."""
+    id: str
+    still: str
+    motion: str
+    content_id: Optional[str]
+    still_image_time: Optional[float]
+    confidence: float

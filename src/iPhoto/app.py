@@ -15,7 +15,7 @@ from .config import (
     RECENTLY_DELETED_DIR_NAME,
 )
 from .models.album import Album
-from .models.types import LiveGroup
+from .domain.models.core import LiveGroup
 from .errors import IndexCorruptedError, ManifestInvalidError
 from .utils.logging import get_logger
 
