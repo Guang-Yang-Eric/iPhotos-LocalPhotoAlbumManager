@@ -46,6 +46,7 @@ from iPhoto.domain.repositories import IAssetRepository
 from iPhoto.infrastructure.db.pool import ConnectionPool
 from iPhoto.infrastructure.repositories.sqlite_asset_repository import SQLiteAssetRepository
 from iPhoto.infrastructure.services.thumbnail_cache_service import ThumbnailCacheService
+from iPhoto.gui.app_bootstrap import AppBootstrap
 
 # New Coordinators
 from iPhoto.gui.coordinators.view_router import ViewRouter
@@ -72,27 +73,16 @@ class MainCoordinator(QObject):
         self._facade = context.facade
         self._logger = logging.getLogger(__name__)
 
-        # Resolve Services
-        if self._container:
-            self._event_bus = self._container.resolve(EventBus)
-            self._album_service = self._container.resolve(AlbumService)
-            self._asset_service = self._container.resolve(AssetService)
-            self._asset_repo = self._container.resolve(IAssetRepository)
-        else:
-            raise RuntimeError("DependencyContainer is required for MainCoordinator")
+        # --- Bootstrap: resolve services & build ViewModels ---
+        self._bootstrap = AppBootstrap(container, context)
+        self._event_bus = self._bootstrap.event_bus
+        self._album_service = self._bootstrap.album_service
+        self._asset_service = self._bootstrap.asset_service
+        self._asset_repo = self._bootstrap.asset_repo
+        self._asset_data_source = self._bootstrap.asset_data_source
+        self._thumbnail_service = self._bootstrap.thumbnail_service
+        self._asset_list_vm = self._bootstrap.asset_list_vm
         self._asset_pool: Optional[ConnectionPool] = None
-
-        # --- ViewModels Setup ---
-        lib_root = context.library.root()
-        self._asset_data_source = AssetDataSource(self._asset_repo, lib_root)
-
-        # Thumbnail Service
-        cache_root = Path.home() / ".iPhoto" / "cache" / "thumbs"
-        if lib_root:
-            cache_root = lib_root / ".iPhoto" / "cache" / "thumbs"
-
-        self._thumbnail_service = ThumbnailCacheService(cache_root)
-        self._asset_list_vm = AssetListViewModel(self._asset_data_source, self._thumbnail_service)
 
         # Inject ViewModel provider into Facade for legacy operations (restore/delete)
         if self._facade:
