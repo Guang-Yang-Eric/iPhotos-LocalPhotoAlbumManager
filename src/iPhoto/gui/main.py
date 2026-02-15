@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication
 
@@ -137,12 +137,21 @@ def main(argv: list[str] | None = None) -> int:
     coordinator.start()
     window.show()
 
-    # Allow opening an album directly via argv[1].
-    if len(arguments) > 1:
-        # Use new coordinator method
-        coordinator.open_album_from_path(Path(arguments[1]))
-    else:
-        window.ui.sidebar.select_all_photos(emit_signal=True)
+    # Defer album opening / "All Photos" loading and the initial background
+    # scan to the *first* event-loop iteration so the window paints immediately.
+    # Without this, the synchronous facade work (DB creation, manifest I/O)
+    # runs before ``app.exec()`` and the user sees a blank desktop for seconds
+    # on large or fresh libraries.
+    def _deferred_startup() -> None:
+        if len(arguments) > 1:
+            coordinator.open_album_from_path(Path(arguments[1]))
+        else:
+            window.ui.sidebar.select_all_photos(emit_signal=True)
+        # Start the initial scan *after* the gallery view is loaded and all
+        # signal connections are in place so scan chunks stream to the UI.
+        context.start_deferred_scan_if_needed()
+
+    QTimer.singleShot(0, _deferred_startup)
 
     return app.exec()
 

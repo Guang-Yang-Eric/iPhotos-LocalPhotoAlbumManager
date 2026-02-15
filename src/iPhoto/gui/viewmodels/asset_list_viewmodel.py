@@ -9,6 +9,7 @@ from PySide6.QtCore import (
     QModelIndex,
     QObject,
     QSize,
+    QTimer,
     Qt,
     Slot,
 )
@@ -30,12 +31,24 @@ class AssetListViewModel(QAbstractListModel):
     Adapts AssetDTOs to Qt Roles expected by AssetGridDelegate.
     """
 
+    # Interval (ms) between flushing buffered scan DTOs to the model.
+    # A single beginInsertRows/endInsertRows per flush keeps the UI responsive
+    # even when many chunks arrive in quick succession.
+    _SCAN_FLUSH_INTERVAL_MS = 200
+
     def __init__(self, data_source: AssetDataSource, thumbnail_service: ThumbnailCacheService, parent=None):
         super().__init__(parent)
         self._data_source = data_source
         self._thumbnails = thumbnail_service
         self._thumb_size = QSize(512, 512)
         self._current_row = -1
+
+        # Scan-chunk throttle buffer ──────────────────────────────────────
+        self._scan_dto_buffer: list[AssetDTO] = []
+        self._scan_flush_timer = QTimer(self)
+        self._scan_flush_timer.setSingleShot(True)
+        self._scan_flush_timer.setInterval(self._SCAN_FLUSH_INTERVAL_MS)
+        self._scan_flush_timer.timeout.connect(self._flush_scan_buffer)
 
         # Connect signals
         self._data_source.dataChanged.connect(self._on_source_changed)
@@ -47,6 +60,8 @@ class AssetListViewModel(QAbstractListModel):
     def load_query(self, query: AssetQuery):
         """Triggers data loading for a new query."""
         self._last_snapshot = None
+        self._scan_dto_buffer.clear()
+        self._scan_flush_timer.stop()
         self._data_source.load(query)
 
     def load_geotagged_assets(self, assets: list, library_root: Path) -> None:
@@ -60,6 +75,8 @@ class AssetListViewModel(QAbstractListModel):
             library_root: The library root path for resolving absolute paths.
         """
         self._last_snapshot = None
+        self._scan_dto_buffer.clear()
+        self._scan_flush_timer.stop()
         self._data_source.load_geotagged_assets(assets, library_root)
 
     def set_active_root(self, root: Optional[Path]) -> None:
@@ -232,19 +249,33 @@ class AssetListViewModel(QAbstractListModel):
         self._last_snapshot = current_snapshot
 
     def _on_scan_dtos_ready(self, dtos: list) -> None:
-        """Handle incremental scan-chunk insertions.
+        """Buffer incoming scan-chunk DTOs and schedule a throttled flush.
 
-        Uses ``beginInsertRows`` / ``endInsertRows`` instead of the expensive
-        ``beginResetModel`` / ``endResetModel`` path so the view only needs to
-        lay out the newly added rows.  This keeps the UI responsive even when
-        hundreds of chunks stream in during a large scan.
+        Instead of calling ``beginInsertRows`` / ``endInsertRows`` for every
+        10-item chunk (which can overwhelm the event loop when hundreds of
+        chunks arrive in quick succession), we accumulate DTOs in a buffer
+        and flush them to the model at most once every
+        :pyattr:`_SCAN_FLUSH_INTERVAL_MS` milliseconds.  This batches many
+        small chunks into a single model update, keeping the UI responsive
+        and allowing the event loop to process user interactions between
+        flushes.
         """
         if not dtos:
             return
+        self._scan_dto_buffer.extend(dtos)
+        if not self._scan_flush_timer.isActive():
+            self._scan_flush_timer.start()
+
+    def _flush_scan_buffer(self) -> None:
+        """Insert all buffered scan DTOs into the model in a single operation."""
+        if not self._scan_dto_buffer:
+            return
+        batch = list(self._scan_dto_buffer)
+        self._scan_dto_buffer.clear()
         first = self.rowCount()
-        last = first + len(dtos) - 1
+        last = first + len(batch) - 1
         self.beginInsertRows(QModelIndex(), first, last)
-        self._data_source.append_dtos(dtos)
+        self._data_source.append_dtos(batch)
         self.endInsertRows()
         # Invalidate snapshot so the next full _on_source_changed recomputes.
         self._last_snapshot = None

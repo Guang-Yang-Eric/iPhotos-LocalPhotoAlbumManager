@@ -131,6 +131,9 @@ class AppContext:
     # DI Container integration
     container: DependencyContainer = field(default_factory=_create_di_container)
 
+    # Whether a background scan should run once the UI is ready.
+    _pending_initial_scan: bool = field(default=False, init=False)
+
     def __post_init__(self) -> None:
         from .errors import LibraryError
         from .gui.ui.theme_manager import ThemeManager
@@ -151,7 +154,9 @@ class AppContext:
             if candidate.exists():
                 try:
                     self.library.bind_path(candidate)
-                    self._start_initial_scan_if_needed(candidate)
+                    # Record that a scan is needed; the actual scan is deferred
+                    # until the UI and signal connections are fully ready.
+                    self._pending_initial_scan = self._needs_initial_scan(candidate)
                 except LibraryError as exc:
                     self.library.errorRaised.emit(str(exc))
             else:
@@ -168,14 +173,27 @@ class AppContext:
         if resolved:
             self.recent_albums = resolved[:10]
 
-    def _start_initial_scan_if_needed(self, library_root: Path) -> None:
+    def _needs_initial_scan(self, library_root: Path) -> bool:
+        """Check whether *library_root* needs a first-time scan."""
         work_dir = library_root / WORK_DIR_NAME
         db_path = work_dir / "global_index.db"
         if work_dir.exists() and db_path.exists():
+            return False
+        return not self.library.is_scanning_path(library_root)
+
+    def start_deferred_scan_if_needed(self) -> None:
+        """Kick off the initial scan now that the UI and signals are connected.
+
+        Called from ``main.py`` after the coordinator and window are fully
+        initialised so that scan-chunk signals reach the gallery view.
+        """
+        if not self._pending_initial_scan:
             return
-        if self.library.is_scanning_path(library_root):
+        self._pending_initial_scan = False
+        root = self.library.root()
+        if root is None:
             return
-        self.library.start_scanning(library_root, DEFAULT_INCLUDE, DEFAULT_EXCLUDE)
+        self.library.start_scanning(root, DEFAULT_INCLUDE, DEFAULT_EXCLUDE)
 
     def remember_album(self, root: Path) -> None:
         """Track *root* in the recent albums list, keeping the most recent first."""
