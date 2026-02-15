@@ -5,6 +5,8 @@ from typing import Any, Dict, Optional
 
 from .base import UseCase, UseCaseRequest, UseCaseResponse
 
+DEFAULT_JPEG_QUALITY = 100
+
 
 @dataclass(frozen=True)
 class ApplyEditRequest(UseCaseRequest):
@@ -37,7 +39,7 @@ class ApplyEditUseCase(UseCase):
                 return ApplyEditResponse(success=False, error="Render returned no result")
 
             output = request.output_path or request.asset_path.with_suffix(".edited.jpg")
-            result.save(str(output), "JPG", 100)
+            result.save(str(output), "JPG", DEFAULT_JPEG_QUALITY)
             return ApplyEditResponse(output_path=str(output))
         except Exception as e:
             self._logger.error("ApplyEdit failed for %s: %s", request.asset_path, e)

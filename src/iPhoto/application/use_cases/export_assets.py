@@ -37,7 +37,7 @@ class ExportAssetsUseCase(UseCase):
 
         exported = 0
         failed = 0
-        failed_paths: list[str] = []
+        failed_paths: List[str] = []
 
         for path in request.source_paths:
             try:
