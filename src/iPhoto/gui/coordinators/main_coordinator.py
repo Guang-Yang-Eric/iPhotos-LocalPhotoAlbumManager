@@ -298,6 +298,10 @@ class MainCoordinator(QObject):
         if self._thumbnail_service:
             self._thumbnail_service.shutdown()
 
+        # 5. Shut down the persistent exiftool pool
+        from iPhoto.utils.exiftool_pool import shutdown_exiftool_pool
+        shutdown_exiftool_pool()
+
         if hasattr(self._window.ui, "preview_window"):
             try:
                 self._window.ui.preview_window.close_preview(False)

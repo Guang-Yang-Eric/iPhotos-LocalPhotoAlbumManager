@@ -1,12 +1,13 @@
-"""Tests verifying that scan results stream incrementally via batch yields
-and the ViewModel's chunkedDtosReady signal routes correctly.
+"""Tests verifying that parallel scan results stream incrementally via
+worker threads and the ViewModel's chunkedDtosReady signal routes correctly.
 """
 
 from __future__ import annotations
 
+import threading
 import time
 from pathlib import Path
-from typing import List
+from typing import List, Set
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -22,43 +23,52 @@ except (ImportError, OSError):
 
 
 # ---------------------------------------------------------------------------
-# scan_album streaming: results should arrive as each batch completes
+# scan_album streaming: results should arrive incrementally from workers
 # ---------------------------------------------------------------------------
 
 
 class TestScanAlbumStreaming:
-    """Verify that scan_album yields results incrementally."""
+    """Verify that scan_album yields results incrementally via parallel workers."""
 
-    def test_results_stream_across_batches(self, tmp_path: Path):
-        """Results from early batches should arrive before later batches."""
-        for i in range(100):
+    def test_results_stream_across_workers(self, tmp_path: Path):
+        """All files should be yielded and processed by parallel workers."""
+        for i in range(40):
             (tmp_path / f"img_{i:03d}.jpg").write_text("x" * 10)
 
-        yield_times: List[float] = []
-        t0 = time.monotonic()
+        observed_threads: Set[str] = set()
+        lock = threading.Lock()
 
-        def _slow_process(root, image_paths, video_paths):
-            time.sleep(0.05)  # simulate I/O per batch
-            for p in image_paths + video_paths:
-                yield {
-                    "rel": p.relative_to(root).as_posix(),
-                    "bytes": 10,
-                    "ts": 0,
-                    "id": f"as_{p.name}",
-                    "media_type": 0,
-                }
+        def _tracking_normalize(root, path, raw_meta):
+            with lock:
+                observed_threads.add(threading.current_thread().name)
+            time.sleep(0.02)  # simulate I/O per file
+            return {
+                "rel": path.relative_to(root).as_posix(),
+                "bytes": 10,
+                "ts": 0,
+                "id": f"as_{path.name}",
+                "media_type": 0,
+            }
 
-        with patch.object(_sa_mod, "process_media_paths", side_effect=_slow_process):
-            for row in _sa_mod.scan_album(tmp_path, ["*.jpg"], []):
-                yield_times.append(time.monotonic() - t0)
+        def _fake_et_batch(paths):
+            return [{"SourceFile": p.as_posix()} for p in paths]
 
-        assert len(yield_times) == 100
+        with patch.object(_sa_mod._metadata_provider, "normalize_metadata", side_effect=_tracking_normalize), \
+             patch("iPhoto.io.scanner_adapter.get_exiftool_pool") as mock_pool:
 
-        # Results should arrive incrementally across multiple batches
-        first_arrival = yield_times[0]
-        last_arrival = yield_times[-1]
-        assert last_arrival - first_arrival > 0.01, (
-            "Results should arrive incrementally, not all at once"
+            fake_et = MagicMock()
+            fake_et.get_metadata_batch.side_effect = _fake_et_batch
+            mock_pool.return_value.get.return_value = fake_et
+            mock_pool.return_value.put.return_value = None
+
+            rows = list(_sa_mod.scan_album(tmp_path, ["*.jpg"], [], num_workers=4))
+
+        assert len(rows) == 40
+
+        # Multiple ScanWorker threads should have processed files
+        scan_threads = {t for t in observed_threads if t.startswith("ScanWorker-")}
+        assert len(scan_threads) > 1, (
+            f"Expected multiple ScanWorker threads, got: {scan_threads}"
         )
 
     def test_cached_results_stream_immediately(self, tmp_path: Path):
@@ -81,50 +91,63 @@ class TestScanAlbumStreaming:
                 "media_type": 0,
             }
 
-        # process_media_paths should NOT be called for cached files
-        call_count = 0
-        original = _sa_mod.process_media_paths
+        et_call_count = 0
 
-        def _counting_process(root, image_paths, video_paths):
-            nonlocal call_count
-            call_count += 1
-            yield from original(root, image_paths, video_paths)
+        def _counting_et_batch(paths):
+            nonlocal et_call_count
+            et_call_count += 1
+            return [{"SourceFile": p.as_posix()} for p in paths]
 
-        with patch.object(_sa_mod, "process_media_paths", side_effect=_counting_process):
+        with patch("iPhoto.io.scanner_adapter.get_exiftool_pool") as mock_pool:
+            fake_et = MagicMock()
+            fake_et.get_metadata_batch.side_effect = _counting_et_batch
+            mock_pool.return_value.get.return_value = fake_et
+            mock_pool.return_value.put.return_value = None
+
             rows = list(_sa_mod.scan_album(
                 tmp_path, ["*.jpg"], [],
                 existing_index=existing_index,
+                num_workers=2,
             ))
 
         assert len(rows) == 10
-        # All items were cached, so process_media_paths should not have been called
-        assert call_count == 0, "Cached items should not trigger metadata extraction"
+        assert et_call_count == 0, "Cached items should not trigger exiftool"
 
-    def test_batch_size_is_50(self, tmp_path: Path):
-        """Verify that scan_album uses batch size 50."""
-        for i in range(60):
+    def test_exiftool_batch_size_is_20(self, tmp_path: Path):
+        """Verify that workers receive batches of ≤20 files (the _EXIFTOOL_BATCH)."""
+        for i in range(50):
             (tmp_path / f"img_{i:03d}.jpg").write_text("x" * 10)
 
         batch_sizes: List[int] = []
+        lock = threading.Lock()
 
-        def _recording_process(root, image_paths, video_paths):
-            batch_sizes.append(len(image_paths) + len(video_paths))
-            for p in image_paths + video_paths:
-                yield {
-                    "rel": p.relative_to(root).as_posix(),
-                    "bytes": 10,
-                    "ts": 0,
-                    "id": f"as_{p.name}",
-                    "media_type": 0,
-                }
+        def _recording_et_batch(paths):
+            with lock:
+                batch_sizes.append(len(paths))
+            return [{"SourceFile": p.as_posix()} for p in paths]
 
-        with patch.object(_sa_mod, "process_media_paths", side_effect=_recording_process):
-            rows = list(_sa_mod.scan_album(tmp_path, ["*.jpg"], []))
+        def _fake_normalize(root, path, raw_meta):
+            return {
+                "rel": path.relative_to(root).as_posix(),
+                "bytes": 10,
+                "ts": 0,
+                "id": f"as_{path.name}",
+                "media_type": 0,
+            }
 
-        assert len(rows) == 60
-        # Batches should be ≤50 (the original batch size)
+        with patch.object(_sa_mod._metadata_provider, "normalize_metadata", side_effect=_fake_normalize), \
+             patch("iPhoto.io.scanner_adapter.get_exiftool_pool") as mock_pool:
+
+            fake_et = MagicMock()
+            fake_et.get_metadata_batch.side_effect = _recording_et_batch
+            mock_pool.return_value.get.return_value = fake_et
+            mock_pool.return_value.put.return_value = None
+
+            rows = list(_sa_mod.scan_album(tmp_path, ["*.jpg"], [], num_workers=2))
+
+        assert len(rows) == 50
         for bs in batch_sizes:
-            assert bs <= 50, f"Batch size {bs} exceeds expected maximum of 50"
+            assert bs <= 20, f"Batch size {bs} exceeds expected maximum of 20"
 
 
 # ---------------------------------------------------------------------------

@@ -1,5 +1,5 @@
 """Tests proving that ParallelScanner uses multiple threads and
-scan_album correctly yields all discovered files."""
+scan_album correctly yields all discovered files using parallel workers."""
 
 from __future__ import annotations
 
@@ -77,37 +77,89 @@ class TestParallelScannerThreading:
 
 
 # ---------------------------------------------------------------------------
-# scan_album: prove sequential batch processing with streaming results
+# scan_album: prove parallel batch processing with multiple workers
 # ---------------------------------------------------------------------------
 
-class TestScanAlbumBatches:
-    """Prove that scan_album processes batches and yields results incrementally."""
+class TestScanAlbumParallelWorkers:
+    """Prove that scan_album uses multiple _MetadataWorkerThread instances."""
 
-    def test_all_files_yielded(self, tmp_path: Path):
-        """Create files and verify all are yielded from scan_album."""
-        for i in range(25):
+    def test_all_files_yielded_with_workers(self, tmp_path: Path):
+        """All discovered files should be yielded via parallel workers."""
+        for i in range(40):
             (tmp_path / f"photo_{i:04d}.jpg").write_text("x" * 100)
 
-        def _fake_process(root, image_paths, video_paths):
-            for p in image_paths + video_paths:
-                yield {
-                    "rel": p.relative_to(root).as_posix(),
-                    "bytes": 100,
-                    "ts": 0,
-                    "id": f"as_{p.name}",
-                    "media_type": 0,
-                }
+        # The workers call _metadata_provider.normalize_metadata and
+        # et.get_metadata_batch.  We patch them to return synthetic rows
+        # without needing exiftool.
+        def _fake_normalize(root, path, raw_meta):
+            return {
+                "rel": path.relative_to(root).as_posix(),
+                "bytes": 100,
+                "ts": 0,
+                "id": f"as_{path.name}",
+                "media_type": 0,
+            }
 
-        with patch.object(
-            _sa_mod, "process_media_paths",
-            side_effect=_fake_process,
-        ):
-            rows = list(_sa_mod.scan_album(tmp_path, ["*.jpg"], []))
+        def _fake_et_batch(paths):
+            return [{"SourceFile": p.as_posix()} for p in paths]
 
-        assert len(rows) == 25
+        with patch.object(_sa_mod._metadata_provider, "normalize_metadata", side_effect=_fake_normalize), \
+             patch.object(_sa_mod._metadata_provider, "get_metadata_batch", side_effect=_fake_et_batch), \
+             patch("iPhoto.io.scanner_adapter.get_exiftool_pool") as mock_pool:
 
-    def test_cached_items_bypass_processing(self, tmp_path: Path):
-        """Cached items should be yielded without calling process_media_paths."""
+            # Create a fake pool that returns a mock exiftool instance
+            fake_et = MagicMock()
+            fake_et.get_metadata_batch.side_effect = _fake_et_batch
+            mock_pool.return_value.get.return_value = fake_et
+            mock_pool.return_value.put.return_value = None
+
+            rows = list(_sa_mod.scan_album(tmp_path, ["*.jpg"], [], num_workers=4))
+
+        assert len(rows) == 40
+
+    def test_multiple_worker_threads_used(self, tmp_path: Path):
+        """Multiple ScanWorker-N threads should process files concurrently."""
+        for i in range(60):
+            (tmp_path / f"photo_{i:04d}.jpg").write_text("x" * 100)
+
+        observed_threads: Set[str] = set()
+        lock = threading.Lock()
+
+        original_normalize = _sa_mod._metadata_provider.normalize_metadata
+
+        def _tracking_normalize(root, path, raw_meta):
+            with lock:
+                observed_threads.add(threading.current_thread().name)
+            time.sleep(0.02)  # simulate I/O
+            return {
+                "rel": path.relative_to(root).as_posix(),
+                "bytes": 100,
+                "ts": 0,
+                "id": f"as_{path.name}",
+                "media_type": 0,
+            }
+
+        def _fake_et_batch(paths):
+            return [{"SourceFile": p.as_posix()} for p in paths]
+
+        with patch.object(_sa_mod._metadata_provider, "normalize_metadata", side_effect=_tracking_normalize), \
+             patch("iPhoto.io.scanner_adapter.get_exiftool_pool") as mock_pool:
+
+            fake_et = MagicMock()
+            fake_et.get_metadata_batch.side_effect = _fake_et_batch
+            mock_pool.return_value.get.return_value = fake_et
+            mock_pool.return_value.put.return_value = None
+
+            rows = list(_sa_mod.scan_album(tmp_path, ["*.jpg"], [], num_workers=4))
+
+        assert len(rows) == 60
+        scan_threads = {t for t in observed_threads if t.startswith("ScanWorker-")}
+        assert len(scan_threads) > 1, (
+            f"Expected multiple ScanWorker threads, got: {scan_threads}"
+        )
+
+    def test_cached_items_bypass_exiftool(self, tmp_path: Path):
+        """Cached items should be yielded without exiftool extraction."""
         for i in range(10):
             p = tmp_path / f"img_{i:03d}.jpg"
             p.write_text("x" * 10)
@@ -124,19 +176,24 @@ class TestScanAlbumBatches:
                 "media_type": 0,
             }
 
-        call_count = 0
-        original = _sa_mod.process_media_paths
+        et_call_count = 0
 
-        def _counting_process(root, image_paths, video_paths):
-            nonlocal call_count
-            call_count += 1
-            yield from original(root, image_paths, video_paths)
+        def _counting_et_batch(paths):
+            nonlocal et_call_count
+            et_call_count += 1
+            return [{"SourceFile": p.as_posix()} for p in paths]
 
-        with patch.object(_sa_mod, "process_media_paths", side_effect=_counting_process):
+        with patch("iPhoto.io.scanner_adapter.get_exiftool_pool") as mock_pool:
+            fake_et = MagicMock()
+            fake_et.get_metadata_batch.side_effect = _counting_et_batch
+            mock_pool.return_value.get.return_value = fake_et
+            mock_pool.return_value.put.return_value = None
+
             rows = list(_sa_mod.scan_album(
                 tmp_path, ["*.jpg"], [],
                 existing_index=existing_index,
+                num_workers=2,
             ))
 
         assert len(rows) == 10
-        assert call_count == 0, "Cached items should not trigger metadata extraction"
+        assert et_call_count == 0, "Cached items should not trigger exiftool"
