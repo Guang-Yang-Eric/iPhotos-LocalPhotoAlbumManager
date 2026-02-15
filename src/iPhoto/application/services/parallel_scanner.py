@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Generator
+from typing import Dict, Generator
 
 from iPhoto.domain.models.core import Asset
 from iPhoto.events.bus import EventBus
@@ -48,14 +50,31 @@ class ParallelScanner:
 
     def scan(self, album_path: Path) -> ScanResult:
         """Scan *album_path* for supported media files in parallel."""
+        scan_start = time.monotonic()
         files = list(self._discover_files(album_path))
         total = len(files)
 
+        LOGGER.info(
+            "▶ ParallelScanner.scan: %s — %d files, %d workers",
+            album_path.name, total, self._max_workers,
+        )
+
         results: list[Asset] = []
         errors: list[tuple[Path, str]] = []
+        thread_stats: Dict[str, int] = {}
+        _stats_lock = threading.Lock()
 
-        with ThreadPoolExecutor(max_workers=self._max_workers) as executor:
-            futures = {executor.submit(self._scan_file_fn, f): f for f in files}
+        def _tracked_scan(path: Path) -> Asset | None:
+            t_name = threading.current_thread().name
+            with _stats_lock:
+                thread_stats[t_name] = thread_stats.get(t_name, 0) + 1
+            return self._scan_file_fn(path)
+
+        with ThreadPoolExecutor(
+            max_workers=self._max_workers,
+            thread_name_prefix="PScan",
+        ) as executor:
+            futures = {executor.submit(_tracked_scan, f): f for f in files}
 
             for i, future in enumerate(as_completed(futures)):
                 path = futures[future]
@@ -83,6 +102,17 @@ class ParallelScanner:
                     total=total,
                 )
             )
+
+        elapsed = time.monotonic() - scan_start
+
+        if thread_stats:
+            LOGGER.info("── Per-thread work distribution ──")
+            for tname, count in sorted(thread_stats.items()):
+                LOGGER.info("  %-20s : %4d files", tname, count)
+        LOGGER.info(
+            "◀ ParallelScanner.scan complete: %d assets, %d errors, %.2fs",
+            len(results), len(errors), elapsed,
+        )
 
         return ScanResult(assets=results, errors=errors)
 
