@@ -189,7 +189,7 @@
 | §2.3 MainCoordinator 精简 | 提取 AppBootstrap | ❌ 未开始 | 依赖 §2.2 |
 | §3 ThumbnailService Qt 连接 | ThumbnailService → ThumbnailCacheService | ❌ 未开始 | 需 Qt 环境测试 |
 | §3 VirtualAssetGrid 集成 | VirtualAssetGrid → GalleryGridView | ❌ 未开始 | 需 Qt Widget 重构 |
-| §3 GPU Pipeline 集成 | ShaderPrecompiler → GLRenderer | ❌ 延后 | 依赖 OpenGL 渲染路径稳定 |
+| §3 GPU Pipeline 集成 | ShaderPrecompiler → GLRenderer | ✅ 已完成 | 预编译集成到 ShaderManager |
 | §4 遗留模型迁移 | `models/album.py` → `domain/models/core.py` | ❌ 延后 | 有兼容层，低优先级 |
 
 ---
@@ -321,7 +321,7 @@ AssetService.get_asset(id)
 4. **VirtualAssetGrid 集成**: 替换 `GalleryGridView` 的全量加载
 
 ### 长期（3 个月）
-5. **GPU Pipeline 集成**: 待 OpenGL 渲染路径稳定后接入
+5. ~~**GPU Pipeline 集成**: 待 OpenGL 渲染路径稳定后接入~~ ✅ 已完成
 6. **遗留模型迁移**: 移除 `models/album.py` 和 `models/types.py` 的兼容层
 
 ---
@@ -333,11 +333,12 @@ AssetService.get_asset(id)
 - ✅ 5/5 P2 Use Cases 实现并测试
 - ✅ ParallelScanner CPU 感知增强 + 流式扫描
 - ✅ 服务层集成（ParallelScanner → LibraryService, WeakAssetCache → AssetService）
-- ✅ DI Bootstrap 扩展（5 个性能服务）
-- ✅ 35 个新增测试，0 回归
+- ✅ DI Bootstrap 扩展（5 个性能服务 + GPU Pipeline 组件）
+- ✅ GPU Pipeline 完全集成（ShaderPrecompiler → ShaderManager, StreamingTextureUploader → TextureManager, FBOPool → gl_offscreen）
+- ✅ 35 + 16 个新增测试，0 回归
 - ✅ 向后兼容性保持
 
-剩余任务（Qt ViewModel 迁移、大文件拆分、GPU Pipeline 集成）因涉及 Qt 依赖或高风险重构，建议在独立迭代中完成。
+剩余任务（Qt ViewModel 迁移、大文件拆分）因涉及 Qt 依赖或高风险重构，建议在独立迭代中完成。
 
 ---
 

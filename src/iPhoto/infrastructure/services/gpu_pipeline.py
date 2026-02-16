@@ -276,6 +276,32 @@ class FBOPool:
         # No-op in a pool — the FBO stays cached for reuse.
         pass
 
+    def configure(
+        self,
+        create_fn: CreateFBOFn | None = None,
+        destroy_fn: DestroyFBOFn | None = None,
+    ) -> None:
+        """Set or replace the create/destroy callbacks.
+
+        Parameters
+        ----------
+        create_fn:
+            ``(width, height) -> fbo_id`` — allocate a new FBO.
+            Only set if not ``None``.
+        destroy_fn:
+            ``(fbo_id) -> None`` — release a FBO.
+            Only set if not ``None``.
+        """
+        if create_fn is not None:
+            self._create_fn = create_fn
+        if destroy_fn is not None:
+            self._destroy_fn = destroy_fn
+
+    @property
+    def is_configured(self) -> bool:
+        """Return ``True`` if a create function has been set."""
+        return self._create_fn is not None
+
     def clear(self) -> None:
         """Destroy and remove all pooled FBOs."""
         with self._lock:

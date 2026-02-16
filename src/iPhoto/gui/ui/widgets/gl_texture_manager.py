@@ -137,7 +137,9 @@ class TextureManager:
             end = start + chunk_height * bytes_per_line
             return buffer[start:end]
 
-        # Create a GL-bound uploader reusing the configured chunk height
+        # Create a fresh GL-bound uploader per call — reuses the configured
+        # chunk height from the injected (DI) uploader but binds the GL-specific
+        # upload callback.  A new instance avoids mutating shared state.
         uploader = StreamingTextureUploader(
             chunk_height=self._streaming_uploader.chunk_height,
             upload_fn=_upload_chunk_fn,

@@ -190,6 +190,22 @@ class TestFBOPoolOffscreenIntegration:
         assert pool.contains(300, 300)
         assert len(destroyed) == 1
 
+    def test_fbo_pool_configure_sets_callbacks(self):
+        """FBOPool.configure() should set create/destroy callbacks."""
+        pool = FBOPool(max_size=4)
+        assert not pool.is_configured
+
+        created = []
+        pool.configure(
+            create_fn=lambda w, h: created.append((w, h)) or f"fbo_{w}x{h}",
+            destroy_fn=lambda fbo: None,
+        )
+        assert pool.is_configured
+
+        fbo = pool.acquire(800, 600)
+        assert fbo == "fbo_800x600"
+        assert len(created) == 1
+
     def test_fbo_pool_clear_destroys_all(self):
         """FBOPool.clear() should destroy all pooled FBOs."""
         pool, _, destroyed = self._make_pool()

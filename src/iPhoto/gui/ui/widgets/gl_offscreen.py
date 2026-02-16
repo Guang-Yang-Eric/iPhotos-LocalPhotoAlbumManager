@@ -32,11 +32,12 @@ def _create_qt_fbo(width: int, height: int) -> QOpenGLFramebufferObject:
 
 def _configure_fbo_pool(pool: FBOPool) -> None:
     """Attach Qt FBO create/destroy callbacks to the pool if not yet configured."""
-    if pool._create_fn is None:
-        pool._create_fn = _create_qt_fbo
-    if pool._destroy_fn is None:
-        # QOpenGLFramebufferObject is cleaned up by Qt GC; explicit no-op.
-        pool._destroy_fn = lambda fbo: None
+    if not pool.is_configured:
+        pool.configure(
+            create_fn=_create_qt_fbo,
+            # QOpenGLFramebufferObject is cleaned up by Qt GC; explicit no-op.
+            destroy_fn=lambda fbo: None,
+        )
 
 
 def render_offscreen_image(
