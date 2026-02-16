@@ -119,8 +119,10 @@ class ShaderManager:
         self.destroy()
 
         if self._precompiler is not None:
+            _LOGGER.info("GPU Pipeline: shader compilation via ShaderPrecompiler (batch)")
             self._compile_shaders_precompiled()
         else:
+            _LOGGER.info("GPU Pipeline: shader compilation via JIT (direct Qt API)")
             self._compile_shaders_jit()
 
         # Shared setup: VAO, GL state, uniform locations, overlay VBO

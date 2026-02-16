@@ -77,6 +77,14 @@ class GLRenderer:
         # UniformState shares the same dict instance populated by ShaderManager
         self._uniform = UniformState(gl_funcs, self._shader_mgr.uniform_locations)
 
+        _LOGGER.info(
+            "GLRenderer initialized — ShaderPrecompiler: %s | "
+            "StreamingTextureUploader: %s | FBOPool: %s",
+            "ON" if shader_precompiler is not None else "OFF",
+            "ON" if streaming_uploader is not None else "OFF",
+            "ON" if fbo_pool is not None else "OFF",
+        )
+
     # ------------------------------------------------------------------
     # Backward-compatible attribute access  (used by tests & internals)
     # ------------------------------------------------------------------

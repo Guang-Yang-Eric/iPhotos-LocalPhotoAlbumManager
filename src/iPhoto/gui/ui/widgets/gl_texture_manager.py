@@ -83,8 +83,17 @@ class TextureManager:
             self._streaming_uploader is not None
             and height >= _STREAMING_THRESHOLD
         ):
+            _LOGGER.info(
+                "GPU Pipeline: streaming texture upload (%dx%d, chunk_height=%d)",
+                width, height, self._streaming_uploader.chunk_height,
+            )
             self._upload_streaming(buffer, qimage.bytesPerLine(), width, height)
         else:
+            if self._streaming_uploader is not None and height < _STREAMING_THRESHOLD:
+                _LOGGER.debug(
+                    "GPU Pipeline: direct texture upload (%dx%d < threshold %d)",
+                    width, height, _STREAMING_THRESHOLD,
+                )
             gl.glTexSubImage2D(
                 gl.GL_TEXTURE_2D,
                 0,

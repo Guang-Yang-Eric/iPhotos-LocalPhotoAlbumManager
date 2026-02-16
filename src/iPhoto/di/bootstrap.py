@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from .container import Container
 from iPhoto.events.bus import EventBus
 from iPhoto.infrastructure.services.cache_stats import CacheStatsCollector
@@ -12,6 +14,8 @@ from iPhoto.infrastructure.services.gpu_pipeline import (
     FBOPool,
     StreamingTextureUploader,
 )
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def bootstrap(container: Container) -> None:
@@ -39,3 +43,9 @@ def bootstrap(container: Container) -> None:
         chunk_height=256,
     )
     container.register_singleton(FBOPool, FBOPool, max_size=4)
+
+    _LOGGER.info(
+        "DI bootstrap complete — registered: EventBus, CacheStatsCollector, "
+        "MemoryThumbnailCache(500), WeakAssetCache(5000), MemoryMonitor(1/2 GiB), "
+        "StreamingTextureUploader(chunk=256), FBOPool(max=4)"
+    )

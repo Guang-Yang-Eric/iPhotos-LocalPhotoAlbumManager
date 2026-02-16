@@ -95,8 +95,13 @@ def render_offscreen_image(
     if fbo_pool is not None:
         _configure_fbo_pool(fbo_pool)
         fbo = fbo_pool.acquire(width, height)
+        _LOGGER.info(
+            "GPU Pipeline: FBO acquired from pool (%dx%d, pool_size=%d/%d)",
+            width, height, fbo_pool.size, fbo_pool.max_size,
+        )
     else:
         fbo = _create_qt_fbo(width, height)
+        _LOGGER.debug("GPU Pipeline: FBO created per-frame (%dx%d, no pool)", width, height)
 
     if not fbo.isValid():
         _LOGGER.error("render_offscreen_image: failed to allocate framebuffer object")
