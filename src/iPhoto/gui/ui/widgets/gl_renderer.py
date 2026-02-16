@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import Mapping, Optional
+from typing import TYPE_CHECKING, Mapping, Optional
 
 import numpy as np
 from PySide6.QtCore import QObject, QPointF, QSize
@@ -44,6 +44,13 @@ from .gl_texture_manager import TextureManager
 from .gl_uniform_state import UniformState
 from .gl_offscreen import render_offscreen_image as _render_offscreen_image
 
+if TYPE_CHECKING:
+    from iPhoto.infrastructure.services.gpu_pipeline import (
+        FBOPool,
+        ShaderPrecompiler,
+        StreamingTextureUploader,
+    )
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -55,12 +62,18 @@ class GLRenderer:
         gl_funcs: QOpenGLFunctions_3_3_Core,
         *,
         parent: Optional[QObject] = None,
+        shader_precompiler: Optional[ShaderPrecompiler] = None,
+        streaming_uploader: Optional[StreamingTextureUploader] = None,
+        fbo_pool: Optional[FBOPool] = None,
     ) -> None:
         self._gl_funcs = gl_funcs
         self._parent = parent
+        self._fbo_pool = fbo_pool
 
-        self._shader_mgr = ShaderManager(gl_funcs, parent=parent)
-        self._tex_mgr = TextureManager()
+        self._shader_mgr = ShaderManager(
+            gl_funcs, parent=parent, shader_precompiler=shader_precompiler
+        )
+        self._tex_mgr = TextureManager(streaming_uploader=streaming_uploader)
         # UniformState shares the same dict instance populated by ShaderManager
         self._uniform = UniformState(gl_funcs, self._shader_mgr.uniform_locations)
 
@@ -559,4 +572,7 @@ class GLRenderer:
         QImage
             CPU-side image containing the rendered frame, converted to Format_ARGB32.
         """
-        return _render_offscreen_image(self, image, adjustments, target_size, time_base)
+        return _render_offscreen_image(
+            self, image, adjustments, target_size, time_base,
+            fbo_pool=self._fbo_pool,
+        )

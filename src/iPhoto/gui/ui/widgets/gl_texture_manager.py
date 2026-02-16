@@ -4,23 +4,35 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING, Optional
 
 import numpy as np
 from PySide6.QtGui import QImage
 from OpenGL import GL as gl
 
+if TYPE_CHECKING:
+    from iPhoto.infrastructure.services.gpu_pipeline import StreamingTextureUploader
+
 _LOGGER = logging.getLogger(__name__)
+
+# Images taller than this threshold use the streaming uploader (if available).
+_STREAMING_THRESHOLD = 2048
 
 
 class TextureManager:
     """Manages the main image texture and auxiliary LUT textures."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        streaming_uploader: Optional[StreamingTextureUploader] = None,
+    ) -> None:
         self._texture_id: int = 0
         self._texture_width: int = 0
         self._texture_height: int = 0
         self._curve_lut_texture_id: int = 0
         self._levels_lut_texture_id: int = 0
+        self._streaming_uploader = streaming_uploader
 
     # ------------------------------------------------------------------
     # Main texture
@@ -66,17 +78,25 @@ class TextureManager:
         gl.glPixelStorei(gl.GL_UNPACK_ALIGNMENT, 1)
         row_length = qimage.bytesPerLine() // 4
         gl.glPixelStorei(gl.GL_UNPACK_ROW_LENGTH, row_length)
-        gl.glTexSubImage2D(
-            gl.GL_TEXTURE_2D,
-            0,
-            0,
-            0,
-            width,
-            height,
-            gl.GL_RGBA,
-            gl.GL_UNSIGNED_BYTE,
-            buffer,
-        )
+
+        if (
+            self._streaming_uploader is not None
+            and height >= _STREAMING_THRESHOLD
+        ):
+            self._upload_streaming(buffer, qimage.bytesPerLine(), width, height)
+        else:
+            gl.glTexSubImage2D(
+                gl.GL_TEXTURE_2D,
+                0,
+                0,
+                0,
+                width,
+                height,
+                gl.GL_RGBA,
+                gl.GL_UNSIGNED_BYTE,
+                buffer,
+            )
+
         gl.glPixelStorei(gl.GL_UNPACK_ROW_LENGTH, 0)
         gl.glPixelStorei(gl.GL_UNPACK_ALIGNMENT, 4)
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_LINEAR)
@@ -89,6 +109,40 @@ class TextureManager:
             _LOGGER.warning("OpenGL error after texture upload: 0x%04X", int(error))
 
         return self._texture_id, self._texture_width, self._texture_height
+
+    def _upload_streaming(
+        self, buffer, bytes_per_line: int, width: int, height: int
+    ) -> None:
+        """Upload texture data in row-band chunks via :class:`StreamingTextureUploader`."""
+        from iPhoto.infrastructure.services.gpu_pipeline import (
+            StreamingTextureUploader,
+            TextureChunk,
+        )
+
+        def _upload_chunk_fn(tex_id: int, chunk: TextureChunk) -> None:
+            gl.glTexSubImage2D(
+                gl.GL_TEXTURE_2D,
+                0,
+                0,
+                chunk.y_offset,
+                chunk.width,
+                chunk.height,
+                gl.GL_RGBA,
+                gl.GL_UNSIGNED_BYTE,
+                chunk.data,
+            )
+
+        def _get_chunk_data(y_offset: int, chunk_height: int, w: int):
+            start = y_offset * bytes_per_line
+            end = start + chunk_height * bytes_per_line
+            return buffer[start:end]
+
+        # Create a GL-bound uploader reusing the configured chunk height
+        uploader = StreamingTextureUploader(
+            chunk_height=self._streaming_uploader.chunk_height,
+            upload_fn=_upload_chunk_fn,
+        )
+        uploader.upload(self._texture_id, width, height, _get_chunk_data)
 
     def delete_texture(self) -> None:
         """Delete the currently bound texture, if any."""

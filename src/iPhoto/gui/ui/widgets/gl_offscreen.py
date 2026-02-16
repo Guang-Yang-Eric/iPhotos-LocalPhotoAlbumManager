@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import TYPE_CHECKING, Mapping
+from typing import TYPE_CHECKING, Mapping, Optional
 
 from PySide6.QtCore import QPointF, QSize
 from PySide6.QtGui import QImage
@@ -17,8 +17,26 @@ from OpenGL import GL as gl
 
 if TYPE_CHECKING:
     from .gl_renderer import GLRenderer
+    from iPhoto.infrastructure.services.gpu_pipeline import FBOPool
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _create_qt_fbo(width: int, height: int) -> QOpenGLFramebufferObject:
+    """Allocate a new Qt FBO with depth-stencil attachment."""
+    fbo_format = QOpenGLFramebufferObjectFormat()
+    fbo_format.setAttachment(QOpenGLFramebufferObject.CombinedDepthStencil)
+    fbo_format.setTextureTarget(gl.GL_TEXTURE_2D)
+    return QOpenGLFramebufferObject(width, height, fbo_format)
+
+
+def _configure_fbo_pool(pool: FBOPool) -> None:
+    """Attach Qt FBO create/destroy callbacks to the pool if not yet configured."""
+    if pool._create_fn is None:
+        pool._create_fn = _create_qt_fbo
+    if pool._destroy_fn is None:
+        # QOpenGLFramebufferObject is cleaned up by Qt GC; explicit no-op.
+        pool._destroy_fn = lambda fbo: None
 
 
 def render_offscreen_image(
@@ -27,6 +45,7 @@ def render_offscreen_image(
     adjustments: Mapping[str, float],
     target_size: QSize,
     time_base: float = 0.0,
+    fbo_pool: Optional[FBOPool] = None,
 ) -> QImage:
     """Render *image* into an off-screen framebuffer and return a :class:`QImage`.
 
@@ -71,10 +90,13 @@ def render_offscreen_image(
     previous_fbo = gl.glGetIntegerv(gl.GL_FRAMEBUFFER_BINDING)
     previous_viewport = gl.glGetIntegerv(gl.GL_VIEWPORT)
 
-    fbo_format = QOpenGLFramebufferObjectFormat()
-    fbo_format.setAttachment(QOpenGLFramebufferObject.CombinedDepthStencil)
-    fbo_format.setTextureTarget(gl.GL_TEXTURE_2D)
-    fbo = QOpenGLFramebufferObject(width, height, fbo_format)
+    # Acquire FBO from pool or create a new one
+    if fbo_pool is not None:
+        _configure_fbo_pool(fbo_pool)
+        fbo = fbo_pool.acquire(width, height)
+    else:
+        fbo = _create_qt_fbo(width, height)
+
     if not fbo.isValid():
         _LOGGER.error("render_offscreen_image: failed to allocate framebuffer object")
         return QImage()
