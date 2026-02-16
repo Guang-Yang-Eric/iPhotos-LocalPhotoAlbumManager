@@ -28,6 +28,7 @@ from PySide6.QtOpenGLWidgets import QOpenGLWidget
 
 from ..gl_crop_controller import CropInteractionController
 from ..gl_renderer import GLRenderer
+from ..gl_shader_manager import ShaderManager
 from ..view_transform_controller import (
     ViewTransformController,
     compute_fit_to_view_scale,
@@ -45,7 +46,17 @@ from .resources import TextureResourceManager
 from .utils import normalise_colour
 from .zoom_controller import ZoomController
 
+from iPhoto.infrastructure.services.gpu_pipeline import (
+    FBOPool,
+    ShaderPrecompiler,
+    StreamingTextureUploader,
+)
+
 _LOGGER = logging.getLogger(__name__)
+
+# GPU Pipeline defaults (match DI bootstrap values in bootstrap.py)
+_GPU_STREAMING_CHUNK_HEIGHT = 256
+_GPU_FBO_POOL_MAX_SIZE = 4
 
 # 如果你的工程没有这个函数，可以改成固定背景色
 try:
@@ -450,24 +461,19 @@ class GLImageViewer(QOpenGLWidget):
             self._renderer.destroy_resources()
 
         # --- GPU Pipeline: create components with GL context available ---
-        from iPhoto.infrastructure.services.gpu_pipeline import (
-            FBOPool,
-            ShaderPrecompiler,
-            StreamingTextureUploader,
-        )
-        from ..gl_shader_manager import ShaderManager
-
         compile_fn = ShaderManager.create_qt_compile_fn(parent=self)
         shader_precompiler = ShaderPrecompiler(compile_fn)
-        streaming_uploader = StreamingTextureUploader(chunk_height=256)
-        fbo_pool = FBOPool(max_size=4)
+        streaming_uploader = StreamingTextureUploader(chunk_height=_GPU_STREAMING_CHUNK_HEIGHT)
+        fbo_pool = FBOPool(max_size=_GPU_FBO_POOL_MAX_SIZE)
 
         _LOGGER.info(
             "initializeGL: created GPU pipeline components — "
             "ShaderPrecompiler(compile_fn=%s), "
-            "StreamingTextureUploader(chunk_height=256), "
-            "FBOPool(max_size=4)",
+            "StreamingTextureUploader(chunk_height=%d), "
+            "FBOPool(max_size=%d)",
             type(compile_fn).__name__,
+            _GPU_STREAMING_CHUNK_HEIGHT,
+            _GPU_FBO_POOL_MAX_SIZE,
         )
 
         self._renderer = GLRenderer(
