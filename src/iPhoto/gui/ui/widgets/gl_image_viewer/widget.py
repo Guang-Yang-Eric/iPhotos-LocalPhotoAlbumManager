@@ -449,7 +449,34 @@ class GLImageViewer(QOpenGLWidget):
         if self._renderer is not None:
             self._renderer.destroy_resources()
 
-        self._renderer = GLRenderer(gf, parent=self)
+        # --- GPU Pipeline: create components with GL context available ---
+        from iPhoto.infrastructure.services.gpu_pipeline import (
+            FBOPool,
+            ShaderPrecompiler,
+            StreamingTextureUploader,
+        )
+        from ..gl_shader_manager import ShaderManager
+
+        compile_fn = ShaderManager.create_qt_compile_fn(parent=self)
+        shader_precompiler = ShaderPrecompiler(compile_fn)
+        streaming_uploader = StreamingTextureUploader(chunk_height=256)
+        fbo_pool = FBOPool(max_size=4)
+
+        _LOGGER.info(
+            "initializeGL: created GPU pipeline components — "
+            "ShaderPrecompiler(compile_fn=%s), "
+            "StreamingTextureUploader(chunk_height=256), "
+            "FBOPool(max_size=4)",
+            type(compile_fn).__name__,
+        )
+
+        self._renderer = GLRenderer(
+            gf,
+            parent=self,
+            shader_precompiler=shader_precompiler,
+            streaming_uploader=streaming_uploader,
+            fbo_pool=fbo_pool,
+        )
         self._renderer.initialize_resources()
         self._adjustment_applicator.update_curve_lut_if_needed(self._adjustments)
         self._adjustment_applicator.update_levels_lut_if_needed(self._adjustments)

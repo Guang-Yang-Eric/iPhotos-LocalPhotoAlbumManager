@@ -15,6 +15,7 @@ from iPhoto.gui.ui.main_window import MainWindow
 
 # New Architecture Imports
 from iPhoto.di.container import DependencyContainer
+from iPhoto.di.bootstrap import bootstrap as di_bootstrap
 from iPhoto.events.bus import EventBus
 from iPhoto.infrastructure.db.pool import ConnectionPool
 from iPhoto.domain.repositories import IAlbumRepository, IAssetRepository
@@ -81,6 +82,9 @@ def main(argv: list[str] | None = None) -> int:
 
     # --- Phase 1: Infrastructure Modernization Setup ---
     container = DependencyContainer()
+
+    # Register all DI services (including GPU pipeline components)
+    di_bootstrap(container)
 
     # 1. Event Bus
     container.register_singleton(EventBus)
