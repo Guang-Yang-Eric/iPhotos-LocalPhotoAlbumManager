@@ -413,6 +413,28 @@ class GLImageViewer(QOpenGLWidget):
 
     # --------------------------- Off-screen rendering ---------------------------
 
+    def prewarm_fbo_pool(self, width: int, height: int) -> None:
+        """Pre-allocate an FBO at the given viewport dimensions.
+
+        Call this after a layout change (e.g. entering fullscreen) so that the
+        first offscreen render at the new resolution does not stall the GPU
+        pipeline with a cold FBO allocation.
+        """
+        if self._renderer is None or self._renderer._fbo_pool is None:
+            return
+        fbo_pool = self._renderer._fbo_pool
+        from ..gl_offscreen import _configure_fbo_pool
+        self.makeCurrent()
+        try:
+            _configure_fbo_pool(fbo_pool)
+            fbo_pool.prewarm(width, height)
+            _LOGGER.info(
+                "FBO pool pre-warmed for %dx%d (pool_size=%d/%d)",
+                width, height, fbo_pool.size, fbo_pool.max_size,
+            )
+        finally:
+            self.doneCurrent()
+
     def render_offscreen_image(
         self,
         target_size: QSize,

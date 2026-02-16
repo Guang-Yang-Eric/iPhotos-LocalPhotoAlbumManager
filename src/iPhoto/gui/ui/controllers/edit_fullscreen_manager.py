@@ -187,6 +187,14 @@ class EditFullscreenManager(QObject):
         )
         self._ui.edit_image_viewer.reset_zoom()
 
+        # Pre-warm the FBO pool at the fullscreen viewport dimensions so the
+        # first zoom / offscreen render does not stall on a cold allocation.
+        viewer = self._ui.edit_image_viewer
+        dpr = viewer.devicePixelRatioF()
+        fs_w = max(1, int(viewer.width() * dpr))
+        fs_h = max(1, int(viewer.height() * dpr))
+        viewer.prewarm_fbo_pool(fs_w, fs_h)
+
         return True
 
     def exit_fullscreen_preview(

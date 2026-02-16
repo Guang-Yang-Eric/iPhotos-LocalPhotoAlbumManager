@@ -322,3 +322,18 @@ class FBOPool:
     def contains(self, width: int, height: int) -> bool:
         with self._lock:
             return (width, height) in self._pool
+
+    def prewarm(self, width: int, height: int) -> None:
+        """Pre-allocate an FBO at the given dimensions if not already cached.
+
+        This is a no-op when the pool already contains a matching entry.
+        Calling this before the first render at a new resolution eliminates
+        the allocation stutter that would otherwise occur on the first frame.
+        """
+        key = (width, height)
+        with self._lock:
+            if key in self._pool:
+                self._pool.move_to_end(key)
+                return
+        # Delegate to acquire which handles creation and eviction.
+        self.acquire(width, height)

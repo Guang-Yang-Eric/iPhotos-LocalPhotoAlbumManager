@@ -227,3 +227,25 @@ class TestFBOPool:
         pool.acquire(100, 100)
         pool.release(100, 100)  # should not raise, FBO stays cached
         assert pool.size == 1
+
+    def test_prewarm_creates_fbo(self):
+        create, destroy, _ = self._counter_factory()
+        pool = FBOPool(max_size=4, create_fn=create, destroy_fn=destroy)
+        pool.prewarm(1920, 1080)
+        assert pool.contains(1920, 1080)
+        assert pool.size == 1
+
+    def test_prewarm_noop_when_cached(self):
+        create, destroy, _ = self._counter_factory()
+        pool = FBOPool(max_size=4, create_fn=create, destroy_fn=destroy)
+        pool.acquire(800, 600)
+        pool.prewarm(800, 600)  # should not create a second FBO
+        assert pool.size == 1
+
+    def test_prewarm_followed_by_acquire_reuses(self):
+        create, destroy, _ = self._counter_factory()
+        pool = FBOPool(max_size=4, create_fn=create, destroy_fn=destroy)
+        pool.prewarm(1920, 1080)
+        fbo = pool.acquire(1920, 1080)
+        assert fbo == "fbo_1_1920x1080"  # same FBO, no second allocation
+        assert pool.size == 1
