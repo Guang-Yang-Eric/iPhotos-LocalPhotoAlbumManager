@@ -19,40 +19,6 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import QShortcut, QKeySequence, QAction
 
-from iPhoto.appctx import AppContext
-from iPhoto.config import DEFAULT_EXCLUDE, DEFAULT_INCLUDE, WORK_DIR_NAME
-from iPhoto.gui.ui.models.roles import Roles
-from iPhoto.gui.ui.models.spacer_proxy_model import SpacerProxyModel
-from iPhoto.gui.ui.controllers.dialog_controller import DialogController
-from iPhoto.gui.ui.controllers.header_controller import HeaderController
-from iPhoto.gui.ui.controllers.share_controller import ShareController
-from iPhoto.gui.ui.controllers.status_bar_controller import StatusBarController
-from iPhoto.gui.ui.controllers.window_theme_controller import WindowThemeController
-from iPhoto.gui.ui.controllers.preview_controller import PreviewController
-from iPhoto.gui.ui.controllers.context_menu_controller import ContextMenuController
-from iPhoto.gui.ui.controllers.selection_controller import SelectionController
-from iPhoto.gui.ui.controllers.export_controller import ExportController
-from iPhoto.gui.ui.widgets.asset_delegate import AssetGridDelegate
-
-# New Architecture Imports
-from iPhoto.gui.viewmodels.album_viewmodel import AlbumViewModel
-from iPhoto.gui.viewmodels.asset_list_viewmodel import AssetListViewModel
-from iPhoto.gui.viewmodels.asset_data_source import AssetDataSource
-from iPhoto.application.services.album_service import AlbumService
-from iPhoto.application.services.asset_service import AssetService
-from iPhoto.di.container import DependencyContainer
-from iPhoto.events.bus import EventBus
-from iPhoto.domain.repositories import IAssetRepository
-from iPhoto.infrastructure.db.pool import ConnectionPool
-from iPhoto.infrastructure.repositories.sqlite_asset_repository import SQLiteAssetRepository
-from iPhoto.infrastructure.services.thumbnail_cache_service import ThumbnailCacheService
-
-# New Coordinators
-from iPhoto.gui.coordinators.view_router import ViewRouter
-from iPhoto.gui.coordinators.navigation_coordinator import NavigationCoordinator
-from iPhoto.gui.coordinators.playback_coordinator import PlaybackCoordinator
-from iPhoto.gui.coordinators.edit_coordinator import EditCoordinator
-
 if TYPE_CHECKING:
     from iPhoto.gui.ui.main_window import MainWindow
 
@@ -63,8 +29,43 @@ class MainCoordinator(QObject):
     legacy controllers and bridging them with the new architecture.
     """
 
-    def __init__(self, window: MainWindow, context: AppContext, container: DependencyContainer = None) -> None:
+    def __init__(self, window: MainWindow, context, container=None) -> None:
         super().__init__(window)
+
+        # Lazy imports: defer heavy modules until coordinator is constructed
+        from iPhoto.config import DEFAULT_EXCLUDE, DEFAULT_INCLUDE, WORK_DIR_NAME
+        from iPhoto.gui.ui.models.roles import Roles
+        from iPhoto.gui.ui.models.spacer_proxy_model import SpacerProxyModel
+        from iPhoto.gui.ui.controllers.dialog_controller import DialogController
+        from iPhoto.gui.ui.controllers.header_controller import HeaderController
+        from iPhoto.gui.ui.controllers.share_controller import ShareController
+        from iPhoto.gui.ui.controllers.status_bar_controller import StatusBarController
+        from iPhoto.gui.ui.controllers.window_theme_controller import WindowThemeController
+        from iPhoto.gui.ui.controllers.preview_controller import PreviewController
+        from iPhoto.gui.ui.controllers.context_menu_controller import ContextMenuController
+        from iPhoto.gui.ui.controllers.selection_controller import SelectionController
+        from iPhoto.gui.ui.controllers.export_controller import ExportController
+        from iPhoto.gui.ui.widgets.asset_delegate import AssetGridDelegate
+        from iPhoto.gui.viewmodels.asset_list_viewmodel import AssetListViewModel
+        from iPhoto.gui.viewmodels.asset_data_source import AssetDataSource
+        from iPhoto.application.services.album_service import AlbumService
+        from iPhoto.application.services.asset_service import AssetService
+        from iPhoto.events.bus import EventBus
+        from iPhoto.domain.repositories import IAssetRepository
+        from iPhoto.infrastructure.db.pool import ConnectionPool
+        from iPhoto.infrastructure.services.thumbnail_cache_service import ThumbnailCacheService
+        from iPhoto.gui.coordinators.view_router import ViewRouter
+        from iPhoto.gui.coordinators.navigation_coordinator import NavigationCoordinator
+        from iPhoto.gui.coordinators.playback_coordinator import PlaybackCoordinator
+        from iPhoto.gui.coordinators.edit_coordinator import EditCoordinator
+
+        # Store class references needed by other methods
+        self._Roles = Roles
+        self._WORK_DIR_NAME = WORK_DIR_NAME
+        self._DEFAULT_INCLUDE = DEFAULT_INCLUDE
+        self._DEFAULT_EXCLUDE = DEFAULT_EXCLUDE
+        self._ConnectionPool = ConnectionPool
+
         self._window = window
         self._context = context
         self._container = container
@@ -455,14 +456,15 @@ class MainCoordinator(QObject):
 
     def _build_asset_repository(
         self, root: Path
-    ) -> tuple[SQLiteAssetRepository, ConnectionPool]:
-        db_path = root / WORK_DIR_NAME / "global_index.db"
+    ):
+        from iPhoto.infrastructure.repositories.sqlite_asset_repository import SQLiteAssetRepository
+        db_path = root / self._WORK_DIR_NAME / "global_index.db"
         db_path.parent.mkdir(parents=True, exist_ok=True)
-        pool = ConnectionPool(db_path)
+        pool = self._ConnectionPool(db_path)
         return SQLiteAssetRepository(pool), pool
 
     def _replace_asset_repository(
-        self, repo: SQLiteAssetRepository, pool: ConnectionPool
+        self, repo, pool
     ) -> None:
         previous_pool = self._asset_pool
         self._asset_pool = pool
@@ -479,7 +481,7 @@ class MainCoordinator(QObject):
 
     def _on_favorite_clicked(self, index: QModelIndex):
         """Handle favorite badge click from grid view."""
-        path_str = self._asset_list_vm.data(index, Roles.REL) or self._asset_list_vm.data(index, Roles.ABS)
+        path_str = self._asset_list_vm.data(index, self._Roles.REL) or self._asset_list_vm.data(index, self._Roles.ABS)
         if path_str:
             new_state = self._asset_service.toggle_favorite_by_path(Path(path_str))
             self._asset_list_vm.update_favorite(index.row(), new_state)
@@ -512,7 +514,7 @@ class MainCoordinator(QObject):
             return
 
         self._context.library.start_scanning(
-            library_root, DEFAULT_INCLUDE, DEFAULT_EXCLUDE
+            library_root, self._DEFAULT_INCLUDE, self._DEFAULT_EXCLUDE
         )
 
     def _handle_edit_clicked(self):
@@ -527,7 +529,7 @@ class MainCoordinator(QObject):
 
         if indexes:
             idx = indexes[0]
-            path_str = self._asset_list_vm.data(idx, Roles.ABS)
+            path_str = self._asset_list_vm.data(idx, self._Roles.ABS)
             if path_str:
                 self._edit.enter_edit_mode(Path(path_str))
 
@@ -578,7 +580,7 @@ class MainCoordinator(QObject):
             indexes = self._window.ui.filmstrip_view.selectionModel().selectedIndexes()
 
         for idx in indexes:
-            path_str = self._asset_list_vm.data(idx, Roles.REL) or self._asset_list_vm.data(idx, Roles.ABS)
+            path_str = self._asset_list_vm.data(idx, self._Roles.REL) or self._asset_list_vm.data(idx, self._Roles.ABS)
             if path_str:
                 new_state = self._asset_service.toggle_favorite_by_path(Path(path_str))
                 self._asset_list_vm.update_favorite(idx.row(), new_state)
@@ -645,7 +647,7 @@ class MainCoordinator(QObject):
     def paths_from_indexes(self, indexes: Iterable[QModelIndex]) -> list[Path]:
         paths = []
         for idx in indexes:
-            p = self._asset_list_vm.data(idx, Roles.ABS)
+            p = self._asset_list_vm.data(idx, self._Roles.ABS)
             if p:
                 paths.append(Path(p))
         return paths

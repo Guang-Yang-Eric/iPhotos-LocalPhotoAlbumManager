@@ -1,6 +1,5 @@
 from pathlib import Path
 from typing import Optional, Tuple
-from PIL import Image, ImageOps
 import logging
 import io
 
@@ -21,7 +20,7 @@ class PillowThumbnailGenerator(IThumbnailGenerator):
             return None
         return generate_micro_thumbnail(path)
 
-    def generate(self, path: Path, size: Tuple[int, int]) -> Optional[Image.Image]:
+    def generate(self, path: Path, size: Tuple[int, int]) -> Optional["Image.Image"]:
         """
         Generate a thumbnail for the given path at the specified size (width, height).
         Returns a PIL Image object or None on failure.
@@ -41,8 +40,10 @@ class PillowThumbnailGenerator(IThumbnailGenerator):
             LOGGER.warning(f"Failed to generate thumbnail for {path}: {e}")
             return None
 
-    def _generate_image_thumbnail(self, path: Path, size: Tuple[int, int]) -> Optional[Image.Image]:
+    def _generate_image_thumbnail(self, path: Path, size: Tuple[int, int]) -> Optional["Image.Image"]:
         try:
+            from PIL import Image, ImageOps
+
             with Image.open(path) as img:
                 if img.mode != "RGB":
                     img = img.convert("RGB")
@@ -57,12 +58,14 @@ class PillowThumbnailGenerator(IThumbnailGenerator):
             LOGGER.warning(f"Pillow failed to open {path}: {e}")
             return None
 
-    def _generate_video_thumbnail(self, path: Path, size: Tuple[int, int]) -> Optional[Image.Image]:
+    def _generate_video_thumbnail(self, path: Path, size: Tuple[int, int]) -> Optional["Image.Image"]:
         try:
             if not path.exists():
                 return None
             data = extract_video_frame(path, at=0.0, scale=size, format="jpeg")
             if data:
+                from PIL import Image
+
                 with io.BytesIO(data) as bio:
                     img = Image.open(bio)
                     img.load()

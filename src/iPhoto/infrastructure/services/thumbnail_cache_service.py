@@ -1,7 +1,6 @@
 from pathlib import Path
 from typing import Dict, Optional, Set
 
-import numpy as np
 from PySide6.QtCore import QObject, QSize, Signal, QThreadPool, QRunnable, Qt
 from PySide6.QtGui import QImage, QPainter, QPixmap, QTransform
 
@@ -251,8 +250,10 @@ class ThumbnailCacheService(QObject):
         )
 
         try:
+            import numpy as np
             matrix = np.linalg.inv(matrix_inv)
-        except np.linalg.LinAlgError:
+        except Exception:
+            import numpy as np
             matrix = np.identity(3)
 
         qt_perspective = QTransform(

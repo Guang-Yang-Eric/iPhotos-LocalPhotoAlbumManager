@@ -10,24 +10,10 @@ import logging
 import uuid
 from typing import Optional
 
-from .di.container import DependencyContainer
-from .domain.repositories import IAlbumRepository, IAssetRepository
-from .infrastructure.repositories.sqlite_asset_repository import SQLiteAssetRepository
-from .infrastructure.repositories.sqlite_album_repository import SQLiteAlbumRepository
-from .infrastructure.db.pool import ConnectionPool
-from .events.bus import EventBus
-from .application.use_cases.open_album import OpenAlbumUseCase
-from .application.use_cases.scan_album import ScanAlbumUseCase
-from .application.use_cases.pair_live_photos import PairLivePhotosUseCase
-from .application.services.album_service import AlbumService
-from .application.services.asset_service import AssetService
-from .infrastructure.services.metadata_provider import ExifToolMetadataProvider
-from .infrastructure.services.thumbnail_generator import PillowThumbnailGenerator
-from .application.interfaces import IMetadataProvider, IThumbnailGenerator
-
 from .config import DEFAULT_EXCLUDE, DEFAULT_INCLUDE, WORK_DIR_NAME
 
 if TYPE_CHECKING:  # pragma: no cover - only for type checking
+    from .di.container import DependencyContainer
     from .gui.facade import AppFacade
     from .library.manager import LibraryManager
     from .settings.manager import SettingsManager
@@ -54,7 +40,22 @@ def _create_library_manager():
 
     return LibraryManager()
 
-def _create_di_container() -> DependencyContainer:
+def _create_di_container() -> "DependencyContainer":
+    from .di.container import DependencyContainer
+    from .infrastructure.db.pool import ConnectionPool
+    from .events.bus import EventBus
+    from .domain.repositories import IAlbumRepository, IAssetRepository
+    from .infrastructure.repositories.sqlite_album_repository import SQLiteAlbumRepository
+    from .infrastructure.repositories.sqlite_asset_repository import SQLiteAssetRepository
+    from .infrastructure.services.metadata_provider import ExifToolMetadataProvider
+    from .infrastructure.services.thumbnail_generator import PillowThumbnailGenerator
+    from .application.interfaces import IMetadataProvider, IThumbnailGenerator
+    from .application.use_cases.open_album import OpenAlbumUseCase
+    from .application.use_cases.scan_album import ScanAlbumUseCase
+    from .application.use_cases.pair_live_photos import PairLivePhotosUseCase
+    from .application.services.album_service import AlbumService
+    from .application.services.asset_service import AssetService
+
     container = DependencyContainer()
 
     # Infrastructure
@@ -129,7 +130,7 @@ class AppContext:
     theme: "ThemeManager" = field(init=False)
 
     # DI Container integration
-    container: DependencyContainer = field(default_factory=_create_di_container)
+    container: "DependencyContainer" = field(default_factory=_create_di_container)
 
     def __post_init__(self) -> None:
         from .errors import LibraryError

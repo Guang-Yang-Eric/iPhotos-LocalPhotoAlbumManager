@@ -7,16 +7,6 @@ from typing import Any, Mapping, MutableMapping
 
 import math
 
-import numpy as np
-try:
-    from numba import jit
-except ImportError:
-    def jit(*args, **kwargs):
-        def decorator(func):
-            return func
-
-        return decorator
-
 from PySide6.QtCore import Qt
 
 try:  # pragma: no cover - availability depends on runtime environment
@@ -25,6 +15,22 @@ try:  # pragma: no cover - availability depends on runtime environment
 except ImportError:  # pragma: no cover - allows non-Qt environments to import the module
     QImage = Any  # type: ignore
     _QT_AVAILABLE = False
+
+
+def _lazy_jit(*args, **kwargs):
+    """A no-op jit decorator used when numba is not available."""
+    def decorator(func):
+        return func
+    return decorator
+
+
+def _get_jit():
+    """Return the numba jit decorator, or a no-op fallback."""
+    try:
+        from numba import jit
+        return jit
+    except ImportError:
+        return _lazy_jit
 
 
 COLOR_KEYS = ("Saturation", "Vibrance", "Cast")
@@ -186,6 +192,8 @@ class ColorResolver:
 def compute_color_statistics(image: QImage, *, max_sample_size: int = 1024) -> ColorStats:
     """Return :class:`ColorStats` describing *image*."""
 
+    import numpy as np
+
     if not _QT_AVAILABLE:
         raise RuntimeError("Qt bindings are required to compute color statistics")
 
@@ -317,7 +325,6 @@ def _smoothstep(edge0: float, edge1: float, x: float) -> float:
     return t * t * (3.0 - 2.0 * t)
 
 
-@jit(nopython=True, inline="always")
 def _clamp(value: float, minimum: float, maximum: float) -> float:
     if value < minimum:
         return minimum
@@ -326,8 +333,10 @@ def _clamp(value: float, minimum: float, maximum: float) -> float:
     return value
 
 
-def _srgb_to_linear(channel: float | np.ndarray) -> float | np.ndarray:
+def _srgb_to_linear(channel):
     """Return *channel* converted from sRGB to linear space."""
+
+    import numpy as np
 
     if np.isscalar(channel):
         channel_float = float(channel)

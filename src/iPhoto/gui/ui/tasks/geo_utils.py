@@ -10,7 +10,11 @@ from __future__ import annotations
 import math
 from typing import Mapping
 
-import numpy as np
+
+def _np():
+    """Lazy numpy accessor."""
+    import numpy as np
+    return np
 
 
 # ------------------------------------------------------------------
@@ -25,8 +29,10 @@ def build_perspective_matrix(
     straighten_degrees: float = 0.0,
     rotate_steps: int = 0,
     flip_horizontal: bool = False,
-) -> np.ndarray:
+):
     """Return the 3×3 matrix that maps projected UVs back to texture UVs."""
+
+    np = _np()
 
     clamped_v = max(-1.0, min(1.0, float(vertical)))
     clamped_h = max(-1.0, min(1.0, float(horizontal)))

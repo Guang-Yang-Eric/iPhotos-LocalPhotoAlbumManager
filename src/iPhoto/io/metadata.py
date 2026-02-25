@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -22,16 +23,16 @@ from .metadata_extractors import (
     _pick_string,
 )
 
-_PILLOW = load_pillow()
-
-if _PILLOW is not None:
-    Image = _PILLOW.Image
-    UnidentifiedImageError = _PILLOW.UnidentifiedImageError
-else:  # pragma: no cover - exercised only when Pillow is missing
-    Image = None  # type: ignore[assignment]
-    UnidentifiedImageError = None  # type: ignore[assignment]
-
 LOGGER = get_logger()
+
+
+@lru_cache(maxsize=1)
+def _pillow_classes():
+    """Return (Image, UnidentifiedImageError) lazily."""
+    pillow = load_pillow()
+    if pillow is not None:
+        return pillow.Image, pillow.UnidentifiedImageError
+    return None, None
 
 
 def read_image_meta_with_exiftool(
@@ -208,6 +209,8 @@ def read_image_meta_with_exiftool(
 
     geometry_missing = info["w"] is None or info["h"] is None
     need_dt_fallback = info["dt"] is None
+
+    Image, UnidentifiedImageError = _pillow_classes()
 
     if (geometry_missing or need_dt_fallback) and Image is not None and UnidentifiedImageError is not None:
         LOGGER.debug("Opening %s with Pillow to backfill metadata", path)

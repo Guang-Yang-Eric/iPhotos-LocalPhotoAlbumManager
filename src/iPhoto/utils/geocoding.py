@@ -5,15 +5,14 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Dict, Optional
 
-import reverse_geocoder  # type: ignore[import]
-
 from .logging import get_logger
 
 
 @lru_cache(maxsize=1)
-def _geocoder() -> "reverse_geocoder.RGeocoder":
+def _geocoder():
     """Return a cached reverse geocoder instance."""
 
+    import reverse_geocoder  # type: ignore[import]
     return reverse_geocoder.RGeocoder(mode=1, verbose=False)
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from functools import lru_cache
 from io import BytesIO
 from pathlib import Path
 from typing import Optional
@@ -12,22 +13,21 @@ from PySide6.QtGui import QImage, QImageReader, QPixmap
 
 from .deps import load_pillow
 
-_PILLOW = load_pillow()
-if _PILLOW is not None:  # pragma: no branch - import guard
-    _Image = _PILLOW.Image
-    _ImageOps = _PILLOW.ImageOps
-    _ImageQt = _PILLOW.ImageQt
-else:  # pragma: no cover - executed when Pillow is unavailable
-    _Image = None  # type: ignore[assignment]
-    _ImageOps = None  # type: ignore[assignment]
-    _ImageQt = None  # type: ignore[assignment]
-
 # Type checking import
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from PIL import Image
 
 _LOGGER = logging.getLogger(__name__)
+
+
+@lru_cache(maxsize=1)
+def _pillow_modules():
+    """Return (Image, ImageOps, ImageQt) lazily on first use."""
+    pillow = load_pillow()
+    if pillow is not None:
+        return pillow.Image, pillow.ImageOps, pillow.ImageQt
+    return None, None, None
 
 
 def load_qimage(source: Path, target: QSize | None = None) -> Optional[QImage]:
@@ -111,6 +111,7 @@ def qimage_from_bytes(data: bytes) -> Optional[QImage]:
         return image
     if image.loadFromData(data, "PNG"):
         return image
+    _Image, _ImageOps, _ImageQt = _pillow_modules()
     if _Image is None or _ImageOps is None or _ImageQt is None:
         return None
     try:
@@ -125,6 +126,7 @@ def qimage_from_bytes(data: bytes) -> Optional[QImage]:
 
 def qimage_from_pil(image: "Image.Image") -> Optional[QImage]:
     """Return a :class:`QImage` from a PIL Image."""
+    _Image, _ImageOps, _ImageQt = _pillow_modules()
     if _ImageQt is None:
         return None
     try:
@@ -136,6 +138,7 @@ def qimage_from_pil(image: "Image.Image") -> Optional[QImage]:
 
 
 def _load_with_pillow(source: Path, target: QSize | None = None) -> Optional[QImage]:
+    _Image, _ImageOps, _ImageQt = _pillow_modules()
     if _Image is None or _ImageOps is None or _ImageQt is None:
         return None
     try:
@@ -158,6 +161,7 @@ def generate_micro_thumbnail(source: Path) -> Optional[bytes]:
     This function loads the image using Pillow, scales it down maintaining aspect ratio
     such that the longest side is 16 pixels, and encodes it as a JPEG.
     """
+    _Image, _ImageOps, _ImageQt = _pillow_modules()
     if _Image is None or _ImageOps is None:
         return None
 
