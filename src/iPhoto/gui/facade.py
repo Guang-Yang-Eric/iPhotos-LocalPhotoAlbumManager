@@ -14,17 +14,17 @@ from ..errors import IPhotoError
 from ..models.album import Album
 from ..utils.logging import get_logger
 from .background_task_manager import BackgroundTaskManager
-from .services import (
-    AlbumMetadataService,
-    AssetImportService,
-    AssetMoveService,
-    DeletionService,
-    LibraryUpdateService,
-    RestorationService,
-)
 
 if TYPE_CHECKING:
     from ..library.manager import LibraryManager
+    from .services import (
+        AlbumMetadataService,
+        AssetImportService,
+        AssetMoveService,
+        DeletionService,
+        LibraryUpdateService,
+        RestorationService,
+    )
 
 import logging
 logger = logging.getLogger(__name__)
@@ -48,6 +48,17 @@ class AppFacade(QObject):
 
     def __init__(self) -> None:
         super().__init__()
+
+        # Lazy-import services to avoid heavy transitive imports at module load time
+        from .services import (
+            AlbumMetadataService,
+            AssetImportService,
+            AssetMoveService,
+            DeletionService,
+            LibraryUpdateService,
+            RestorationService,
+        )
+
         self._logger = get_logger()
         self._current_album: Optional[Album] = None
         self._pending_index_announcements: Set[Path] = set()

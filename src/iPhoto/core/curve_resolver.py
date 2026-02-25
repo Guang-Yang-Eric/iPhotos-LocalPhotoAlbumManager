@@ -5,8 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import List, Tuple
 
-import numpy as np
-
 from .spline import MonotoneCubicSpline
 
 
@@ -127,13 +125,15 @@ def _build_channel_spline(channel: CurveChannel) -> MonotoneCubicSpline:
 
 def _evaluate_with_clamping(
     spline: MonotoneCubicSpline,
-    inputs: np.ndarray,
+    inputs,
     start_x: float,
     start_y: float,
     end_x: float,
     end_y: float,
-) -> np.ndarray:
+):
     """Evaluate spline with clamping outside the defined range."""
+    import numpy as np
+
     vals = spline.evaluate(inputs).copy()
     mask_low = inputs < start_x
     mask_high = inputs > end_x
@@ -142,13 +142,15 @@ def _evaluate_with_clamping(
     return np.clip(vals, 0.0, 1.0)
 
 
-def generate_curve_lut(params: CurveParams) -> np.ndarray:
+def generate_curve_lut(params: CurveParams):
     """Generate a 256x3 LUT from curve parameters.
 
     Returns:
         numpy array of shape (256, 3) with float32 values in [0, 1] range.
         Each row contains [R, G, B] output values for the corresponding input level.
     """
+    import numpy as np
+
     xs = np.linspace(0, 1, 256)
 
     # Build splines for each channel
@@ -203,9 +205,9 @@ def generate_curve_lut(params: CurveParams) -> np.ndarray:
 
 
 def apply_curve_lut_to_image(
-    image_array: np.ndarray,
-    lut: np.ndarray,
-) -> np.ndarray:
+    image_array,
+    lut,
+):
     """Apply a curve LUT to an image array.
 
     Args:
@@ -215,6 +217,8 @@ def apply_curve_lut_to_image(
     Returns:
         numpy array of same shape as input with curve applied
     """
+    import numpy as np
+
     # Convert to indices (0-255)
     result = image_array.copy()
 
