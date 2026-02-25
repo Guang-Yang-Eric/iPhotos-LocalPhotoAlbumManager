@@ -9,7 +9,12 @@ of concerns:
 
 from __future__ import annotations
 
-# Re-export the main API for backwards compatibility
-from .facade import apply_adjustments
+
+def __getattr__(name):
+    if name == "apply_adjustments":
+        from .facade import apply_adjustments
+        return apply_adjustments
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = ["apply_adjustments"]

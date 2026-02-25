@@ -8,14 +8,17 @@ from iPhoto.utils import ffmpeg
 
 def test_extract_frame_with_pyav_returns_none_when_av_missing(monkeypatch):
     """Ensure it returns None if av module is not present."""
-    monkeypatch.setattr(ffmpeg, "av", None)
+    monkeypatch.setattr(ffmpeg, "_get_av", lambda: None)
     result = ffmpeg.extract_frame_with_pyav(Path("video.mp4"))
     assert result is None
 
-@patch("iPhoto.utils.ffmpeg.av")
-def test_extract_frame_with_pyav_opens_container(mock_av, tmp_path):
+@patch("iPhoto.utils.ffmpeg._get_av")
+def test_extract_frame_with_pyav_opens_container(mock_get_av, tmp_path):
     """Test that it opens the container and seeks."""
     video_path = tmp_path / "video.mp4"
+
+    mock_av = MagicMock()
+    mock_get_av.return_value = mock_av
 
     # Mock container and stream
     mock_container = MagicMock()
@@ -41,10 +44,13 @@ def test_extract_frame_with_pyav_opens_container(mock_av, tmp_path):
     assert mock_container.seek.called
     assert result == mock_image
 
-@patch("iPhoto.utils.ffmpeg.av")
-def test_extract_frame_with_pyav_no_seek(mock_av, tmp_path):
+@patch("iPhoto.utils.ffmpeg._get_av")
+def test_extract_frame_with_pyav_no_seek(mock_get_av, tmp_path):
     """Test extraction without seeking (first frame)."""
     video_path = tmp_path / "video.mp4"
+
+    mock_av = MagicMock()
+    mock_get_av.return_value = mock_av
 
     mock_container = MagicMock()
     mock_av.open.return_value.__enter__.return_value = mock_container
@@ -66,10 +72,13 @@ def test_extract_frame_with_pyav_no_seek(mock_av, tmp_path):
     assert result == mock_image
     assert not mock_container.seek.called
 
-@patch("iPhoto.utils.ffmpeg.av")
-def test_extract_frame_with_pyav_handles_scaling(mock_av, tmp_path):
+@patch("iPhoto.utils.ffmpeg._get_av")
+def test_extract_frame_with_pyav_handles_scaling(mock_get_av, tmp_path):
     """Test scaling logic."""
     video_path = tmp_path / "video.mp4"
+
+    mock_av = MagicMock()
+    mock_get_av.return_value = mock_av
 
     mock_container = MagicMock()
     mock_av.open.return_value.__enter__.return_value = mock_container
@@ -96,10 +105,13 @@ def test_extract_frame_with_pyav_handles_scaling(mock_av, tmp_path):
     # New height = 1080 * 0.166 = 180
     assert result.size == (320, 180)
 
-@patch("iPhoto.utils.ffmpeg.av")
-def test_extract_frame_with_pyav_handles_scaling_odd_dimensions(mock_av, tmp_path):
+@patch("iPhoto.utils.ffmpeg._get_av")
+def test_extract_frame_with_pyav_handles_scaling_odd_dimensions(mock_get_av, tmp_path):
     """Test scaling logic ensures even dimensions matching ffmpeg logic."""
     video_path = tmp_path / "video.mp4"
+
+    mock_av = MagicMock()
+    mock_get_av.return_value = mock_av
 
     mock_container = MagicMock()
     mock_av.open.return_value.__enter__.return_value = mock_container
@@ -122,9 +134,11 @@ def test_extract_frame_with_pyav_handles_scaling_odd_dimensions(mock_av, tmp_pat
     assert result is not None
     assert result.size == (34, 34)
 
-@patch("iPhoto.utils.ffmpeg.av")
-def test_extract_frame_with_pyav_exception_returns_none(mock_av, tmp_path):
+@patch("iPhoto.utils.ffmpeg._get_av")
+def test_extract_frame_with_pyav_exception_returns_none(mock_get_av, tmp_path):
     """Test exception handling."""
+    mock_av = MagicMock()
+    mock_get_av.return_value = mock_av
     # Ensure av.FFmpegError is a real exception type so it can be caught
     mock_av.FFmpegError = Exception
 

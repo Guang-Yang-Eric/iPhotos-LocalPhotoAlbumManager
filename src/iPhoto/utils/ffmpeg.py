@@ -13,17 +13,25 @@ from ..errors import ExternalToolError
 if TYPE_CHECKING:
     from PIL import Image
 
-try:  # pragma: no cover - optional dependency detection
-    import av  # type: ignore
-except Exception:  # pragma: no cover - PyAV not available or broken
-    av = None  # type: ignore[assignment]
-
-try:  # pragma: no cover - optional dependency detection
-    import cv2  # type: ignore
-except Exception:  # pragma: no cover - OpenCV not available or broken
-    cv2 = None  # type: ignore[assignment]
-
 _FFMPEG_LOG_LEVEL = "error"
+
+
+def _get_av():
+    """Return the PyAV module if available, else None."""
+    try:
+        import av  # type: ignore
+        return av
+    except Exception:
+        return None
+
+
+def _get_cv2():
+    """Return the OpenCV module if available, else None."""
+    try:
+        import cv2  # type: ignore
+        return cv2
+    except Exception:
+        return None
 
 
 def _run_command(command: Sequence[str]) -> subprocess.CompletedProcess[bytes]:
@@ -72,6 +80,7 @@ def extract_frame_with_pyav(
         dimensions for the output image. The aspect ratio is preserved and
         the image is resized to fit within the given box if necessary.
     """
+    av = _get_av()
     if av is None:
         return None
 
@@ -241,6 +250,7 @@ def _extract_with_opencv(
     scale: Optional[tuple[int, int]],
     format: str,
 ) -> Optional[bytes]:
+    cv2 = _get_cv2()
     if cv2 is None:
         return None
 

@@ -7,14 +7,19 @@ application, which is particularly efficient for large images.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from functools import lru_cache
 
 from PySide6.QtGui import QImage
 
-from ...utils.deps import load_pillow
 from .algorithms import _apply_channel_adjustments, _float_to_uint8
 from .utils import _resolve_pixel_buffer
 
-_PILLOW_SUPPORT = load_pillow()
+
+@lru_cache(maxsize=1)
+def _pillow_support():
+    """Return Pillow support lazily on first use."""
+    from ...utils.deps import load_pillow
+    return load_pillow()
 
 
 def build_adjustment_lut(
@@ -51,7 +56,7 @@ def apply_adjustments_with_lut(image: QImage, lut: Sequence[int]) -> QImage | No
     Returns None if Pillow is not available or if processing fails.
     """
 
-    support = _PILLOW_SUPPORT
+    support = _pillow_support()
     if support is None or support.Image is None or support.ImageQt is None:
         return None
 

@@ -9,19 +9,43 @@ dependencies on Qt, Pillow, or specific image formats.
 from __future__ import annotations
 
 import math
+import os
+import sys
 
-try:
-    from numba import jit
-except ImportError:
-    # Fallback if Numba is not present (e.g. running in stripped AOT mode).
-    # This allows the module to be imported without error, although these
-    # functions shouldn't be called directly in AOT mode (the compiled
-    # extension should be used instead).
-    def jit(*args, **kwargs):
-        def decorator(func):
-            return func
 
-        return decorator
+def _noop_jit(*args, **kwargs):
+    """No-op JIT decorator used when Numba is unavailable."""
+    def decorator(func):
+        return func
+    return decorator
+
+
+def _resolve_jit():
+    """Return the best available JIT decorator without importing Numba eagerly.
+
+    Numba is skipped during startup in Nuitka/frozen builds and when the
+    environment variable ``NUMBA_DISABLE_JIT`` is set, which avoids the
+    significant import cost (~0.5-1s) of loading LLVM and its support libraries.
+    """
+    _IS_COMPILED = (
+        "__compiled__" in globals()
+        or hasattr(sys, "frozen")
+        or hasattr(sys, "_MEIPASS")
+    )
+    if _IS_COMPILED:
+        return _noop_jit
+
+    if os.environ.get("NUMBA_DISABLE_JIT") == "1":
+        return _noop_jit
+
+    try:
+        from numba import jit
+        return jit
+    except ImportError:
+        return _noop_jit
+
+
+jit = _resolve_jit()
 
 
 @jit(nopython=True, inline="always")

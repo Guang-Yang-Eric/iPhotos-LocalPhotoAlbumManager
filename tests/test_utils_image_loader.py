@@ -25,7 +25,7 @@ def test_qimage_from_pil_success():
 
 def test_qimage_from_pil_handles_missing_imageqt(monkeypatch):
     """Test returns None if ImageQt is not available."""
-    monkeypatch.setattr(image_loader, "_ImageQt", None)
+    monkeypatch.setattr(image_loader, "_pillow_modules", lambda: (MagicMock(), MagicMock(), None))
 
     pil_image = Image.new("RGB", (10, 10))
     qimg = image_loader.qimage_from_pil(pil_image)
@@ -35,7 +35,7 @@ def test_qimage_from_pil_handles_missing_imageqt(monkeypatch):
 def test_qimage_from_pil_handles_exception(monkeypatch):
     """Test returns None if conversion raises exception."""
     mock_image_qt = MagicMock(side_effect=Exception("Conversion failed"))
-    monkeypatch.setattr(image_loader, "_ImageQt", mock_image_qt)
+    monkeypatch.setattr(image_loader, "_pillow_modules", lambda: (MagicMock(), MagicMock(), mock_image_qt))
 
     pil_image = Image.new("RGB", (10, 10))
     qimg = image_loader.qimage_from_pil(pil_image)
@@ -46,7 +46,9 @@ def test_qimage_from_pil_converts_to_rgba():
     """Test that image is converted to RGBA before QImage creation."""
     pil_image = Image.new("L", (10, 10)) # Grayscale
 
-    with patch("iPhoto.utils.image_loader._ImageQt") as mock_qt:
+    with patch("iPhoto.utils.image_loader._pillow_modules") as mock_modules:
+        mock_qt = MagicMock()
+        mock_modules.return_value = (MagicMock(), MagicMock(), mock_qt)
         image_loader.qimage_from_pil(pil_image)
 
         # Check that the image passed to ImageQt was converted
@@ -102,7 +104,7 @@ def test_generate_micro_thumbnail_converts_to_rgb(tmp_path):
 
 def test_generate_micro_thumbnail_handles_missing_dependencies(monkeypatch, tmp_path):
     """Test returns None if Pillow dependencies are missing."""
-    monkeypatch.setattr(image_loader, "_Image", None)
+    monkeypatch.setattr(image_loader, "_pillow_modules", lambda: (None, None, None))
     image_path = tmp_path / "test.jpg"
     # File doesn't even need to exist if dependency check fails first
 

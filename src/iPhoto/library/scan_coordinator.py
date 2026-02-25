@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Dict, Iterable, List, Optional
 from PySide6.QtCore import QMutexLocker
 
 from ..utils.logging import get_logger
-from .workers.scanner_worker import ScannerSignals, ScannerWorker
 
 if TYPE_CHECKING:
     pass
@@ -26,6 +25,8 @@ class ScanCoordinatorMixin:
         
         All scanned assets are written to the global database at the library root.
         """
+        from .workers.scanner_worker import ScannerSignals, ScannerWorker
+
         # Prepare signals outside the lock
         signals = ScannerSignals()
         signals.progressUpdated.connect(self.scanProgress)

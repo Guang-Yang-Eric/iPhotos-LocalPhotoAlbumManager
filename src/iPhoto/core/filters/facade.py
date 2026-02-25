@@ -10,7 +10,6 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-import numpy as np
 from PySide6.QtGui import QImage
 
 from ..color_resolver import ColorStats, compute_color_statistics
@@ -383,6 +382,8 @@ def apply_adjustments(
 
 def _apply_curve_to_qimage(image: QImage, adjustments: Mapping[str, Any]) -> QImage:
     """Apply curve LUT to a QImage."""
+    import numpy as np
+
     # Build CurveParams from adjustment data
     params = CurveParams(enabled=True)
 
@@ -438,6 +439,8 @@ def _apply_curve_to_qimage(image: QImage, adjustments: Mapping[str, Any]) -> QIm
 
 def _apply_levels_to_qimage(image: QImage, adjustments: Mapping[str, Any]) -> QImage:
     """Apply levels LUT to a QImage."""
+    import numpy as np
+
     handles = adjustments.get("Levels_Handles")
     if not isinstance(handles, list) or len(handles) != 5:
         return image
@@ -468,6 +471,8 @@ def _apply_levels_to_qimage(image: QImage, adjustments: Mapping[str, Any]) -> QI
 
 def _apply_selective_color_to_qimage(image: QImage, adjustments: Mapping[str, Any]) -> QImage:
     """Apply Selective Color adjustments to a QImage."""
+    import numpy as np
+
     ranges = adjustments.get("SelectiveColor_Ranges")
     if not isinstance(ranges, list) or len(ranges) != 6:
         return image

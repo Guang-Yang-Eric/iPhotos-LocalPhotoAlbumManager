@@ -216,7 +216,7 @@ def test_extract_with_opencv_scales_and_encodes(monkeypatch: pytest.MonkeyPatch,
             encode_calls.append((ext, frame.shape[:2], params))
             return True, FakeBuffer(b"encoded")
 
-    monkeypatch.setattr(ffmpeg, "cv2", FakeCV2)
+    monkeypatch.setattr(ffmpeg, "_get_cv2", lambda: FakeCV2)
 
     data = ffmpeg._extract_with_opencv(input_path, at=0.5, scale=(4, 4), format="jpeg")
 
