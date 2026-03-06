@@ -105,22 +105,28 @@ def pair_live(index_rows: List[Dict[str, object]]) -> List[LiveGroup]:
             used_videos.add(chosen["rel"])
 
     # 2) medium match by same stem + time delta
+    video_by_stem: Dict[str, List[Dict[str, object]]] = defaultdict(list)
+    for video in videos.values():
+        video_by_stem[Path(video["rel"]).stem.lower()].append(video)
     for photo in photos.values():
         if photo["rel"] in matched:
             continue
         stem = Path(photo["rel"]).stem.lower()
-        candidates = [v for v in videos.values() if Path(v["rel"]).stem.lower() == stem]
+        candidates = video_by_stem.get(stem, [])
         chosen = _match_by_time(photo, candidates, used_videos)
         if chosen:
             used_videos.add(chosen["rel"])
             matched[photo["rel"]] = _build_group(photo, chosen, confidence=0.7)
 
     # 3) weak match by directory proximity
+    video_by_folder: Dict[str, List[Dict[str, object]]] = defaultdict(list)
+    for video in videos.values():
+        video_by_folder[Path(video["rel"]).parent.as_posix().lower()].append(video)
     for photo in photos.values():
         if photo["rel"] in matched:
             continue
         folder = Path(photo["rel"]).parent.as_posix().lower()
-        candidates = [v for v in videos.values() if Path(v["rel"]).parent.as_posix().lower() == folder]
+        candidates = video_by_folder.get(folder, [])
         chosen = _match_by_time(photo, candidates, used_videos)
         if chosen:
             used_videos.add(chosen["rel"])

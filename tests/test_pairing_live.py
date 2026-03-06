@@ -171,7 +171,7 @@ def test_pairing_case_insensitive_directory_matching() -> None:
             "dt": dt1,
         },
         {
-            # Different stem so stage-2 won't match; same folder (different case)
+            # Different stem so stage 2 won't match; same folder (different case)
             "rel": "DCIM/photos/VID_9999.MOV",
             "mime": "video/quicktime",
             "dt": dt2,
