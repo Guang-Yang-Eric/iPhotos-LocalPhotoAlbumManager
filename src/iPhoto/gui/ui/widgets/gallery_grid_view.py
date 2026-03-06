@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from OpenGL import GL as gl
-from PySide6.QtCore import QEvent, QRect, QSize, Qt, Signal, QPoint
+from PySide6.QtCore import QEvent, QRect, QSize, Qt, Signal, QPoint, QTimer
 from PySide6.QtGui import QMouseEvent, QPaintEvent, QPalette, QSurfaceFormat, QColor, QGuiApplication
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from PySide6.QtWidgets import QAbstractItemView, QListView, QLabel
@@ -31,6 +31,18 @@ class GalleryViewport(QOpenGLWidget):
         """Set the background color for the viewport."""
         self._bg_color = color
         self.update()
+
+    def initializeGL(self) -> None:
+        """Ensure the viewport repaints after the GL context is created.
+
+        On Linux the first paint may execute before the OpenGL context is
+        fully usable, which can leave the first visible thumbnail blank.
+        Scheduling a deferred update guarantees a
+        complete repaint once the context is ready.
+        """
+
+        self.clear_background()
+        QTimer.singleShot(0, self.update)
 
     def paintGL(self) -> None:
         """Clear the background to the theme's base color with full opacity."""
@@ -190,6 +202,10 @@ class GalleryGridView(AssetGrid):
             except (RuntimeError, TypeError):
                 pass
             try:
+                previous.modelReset.disconnect(self._deferred_viewport_update)
+            except (RuntimeError, TypeError):
+                pass
+            try:
                 previous.rowsInserted.disconnect(self._update_empty_state)
             except (RuntimeError, TypeError):
                 pass
@@ -200,6 +216,7 @@ class GalleryGridView(AssetGrid):
         super().setModel(model)
         if model is not None:
             model.modelReset.connect(self._update_empty_state)
+            model.modelReset.connect(self._deferred_viewport_update)
             model.rowsInserted.connect(self._update_empty_state)
             model.rowsRemoved.connect(self._update_empty_state)
         self._update_empty_state()
@@ -211,6 +228,19 @@ class GalleryGridView(AssetGrid):
             return
         self._empty_label.setGeometry(self.viewport().rect())
         self._empty_label.setVisible(is_empty)
+
+    def _deferred_viewport_update(self) -> None:
+        """Force a full viewport repaint after a model reset.
+
+        On Linux with an OpenGL viewport the partial-update path triggered by
+        ``dataChanged`` may not reliably repaint the first visible item.
+        Scheduling a deferred ``update()`` after the model has been reset
+        ensures every visible cell is redrawn once the new data is available.
+        """
+
+        viewport = self.viewport()
+        if viewport is not None:
+            QTimer.singleShot(0, viewport.update)
 
     # ------------------------------------------------------------------
     # Selection mode toggling
