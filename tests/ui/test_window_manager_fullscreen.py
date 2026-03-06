@@ -137,7 +137,7 @@ def test_exit_fullscreen_restores_right_panel_margins():
     manager.cleanup()
 
 
-def test_immersive_backdrop_includes_right_panel():
+def test_right_panel_background_set_to_black_in_fullscreen():
     """Right panel background should be black during fullscreen and restored on exit."""
     manager, ui, _window = _make_manager()
     original_style = ui.right_panel.styleSheet()
