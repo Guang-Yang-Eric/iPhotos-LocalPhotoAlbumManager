@@ -175,6 +175,10 @@ class EditFullscreenManager(QObject):
             total = max(1, splitter.width())
         splitter.setSizes([0, total])
 
+        right_layout = self._ui.right_panel.layout()
+        if right_layout is not None:
+            right_layout.setContentsMargins(0, 0, 0, 0)
+
         self._window.showFullScreen()
 
         self._fullscreen_active = True
@@ -246,6 +250,10 @@ class EditFullscreenManager(QObject):
         if self._fullscreen_splitter_sizes:
             self._ui.splitter.setSizes(self._fullscreen_splitter_sizes)
         self._fullscreen_splitter_sizes = None
+
+        right_layout = self._ui.right_panel.layout()
+        if right_layout is not None:
+            right_layout.setContentsMargins(8, 8, 8, 8)
 
         self._fullscreen_active = False
 

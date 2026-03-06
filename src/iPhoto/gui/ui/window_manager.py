@@ -83,6 +83,7 @@ class FramelessWindowManager(QObject):
         self._window_shell_stylesheet = self._ui.window_shell.styleSheet()
         self._player_container_stylesheet = self._ui.player_container.styleSheet()
         self._player_stack_stylesheet = self._ui.player_stack.styleSheet()
+        self._right_panel_stylesheet = self._ui.right_panel.styleSheet()
         self._immersive_background_applied = False
         self._immersive_visibility_targets = self._build_immersive_targets()
 
@@ -259,6 +260,10 @@ class FramelessWindowManager(QObject):
             self._ui.video_area.hide_controls(animate=False)
             self._ui.splitter.setSizes([0, sum(self._splitter_sizes or [self._window.width()])])
 
+            right_layout = self._ui.right_panel.layout()
+            if right_layout is not None:
+                right_layout.setContentsMargins(0, 0, 0, 0)
+
         self._apply_immersive_backdrop()
 
         self._immersive_active = True
@@ -310,6 +315,10 @@ class FramelessWindowManager(QObject):
                 and self._ui.video_area.isVisible()
             ):
                 self._ui.video_area.show_controls(animate=False)
+
+            right_layout = self._ui.right_panel.layout()
+            if right_layout is not None:
+                right_layout.setContentsMargins(8, 8, 8, 8)
 
         edit_controller = self._edit_controller()
         if (
@@ -551,12 +560,14 @@ class FramelessWindowManager(QObject):
         self._window_shell_stylesheet = self._ui.window_shell.styleSheet()
         self._player_container_stylesheet = self._ui.player_container.styleSheet()
         self._player_stack_stylesheet = self._ui.player_stack.styleSheet()
+        self._right_panel_stylesheet = self._ui.right_panel.styleSheet()
 
         self._rounded_shell.set_corner_radius(0)
         self._rounded_shell.set_override_color(QColor("#000000"))
         self._ui.window_shell.setStyleSheet("background-color: #000000;")
         self._ui.player_container.setStyleSheet("background-color: #000000;")
         self._ui.player_stack.setStyleSheet("background-color: #000000;")
+        self._ui.right_panel.setStyleSheet("background-color: #000000;")
         self._ui.image_viewer.set_immersive_background(True)
         self._ui.video_area.set_immersive_background(True)
         self._immersive_background_applied = True
@@ -568,6 +579,7 @@ class FramelessWindowManager(QObject):
         self._ui.window_shell.setStyleSheet(self._window_shell_stylesheet)
         self._ui.player_container.setStyleSheet(self._player_container_stylesheet)
         self._ui.player_stack.setStyleSheet(self._player_stack_stylesheet)
+        self._ui.right_panel.setStyleSheet(self._right_panel_stylesheet)
         self._ui.image_viewer.set_immersive_background(False)
         self._ui.video_area.set_immersive_background(False)
         self._rounded_shell.set_override_color(None)
