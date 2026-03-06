@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from OpenGL import GL as gl
-from PySide6.QtCore import QEvent, QRect, QSize, Qt, Signal, QPoint
+from PySide6.QtCore import QEvent, QRect, QSize, Qt, Signal, QPoint, QTimer
 from PySide6.QtGui import QMouseEvent, QPaintEvent, QPalette, QSurfaceFormat, QColor, QGuiApplication
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from PySide6.QtWidgets import QAbstractItemView, QListView, QLabel
@@ -31,6 +31,16 @@ class GalleryViewport(QOpenGLWidget):
         """Set the background color for the viewport."""
         self._bg_color = color
         self.update()
+
+    def initializeGL(self) -> None:
+        """Ensure a repaint after the GL context is fully ready.
+
+        On Linux the OpenGL context may not be available during the very first
+        paint cycle. Scheduling a deferred update guarantees items are redrawn
+        once the context is actually usable.
+        """
+        super().initializeGL()
+        QTimer.singleShot(0, self.update)
 
     def paintGL(self) -> None:
         """Clear the background to the theme's base color with full opacity."""

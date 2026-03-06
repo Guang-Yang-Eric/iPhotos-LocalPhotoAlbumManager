@@ -108,8 +108,8 @@ def pair_live(index_rows: List[Dict[str, object]]) -> List[LiveGroup]:
     for photo in photos.values():
         if photo["rel"] in matched:
             continue
-        stem = Path(photo["rel"]).stem
-        candidates = [v for v in videos.values() if Path(v["rel"]).stem == stem]
+        stem = Path(photo["rel"]).stem.lower()
+        candidates = [v for v in videos.values() if Path(v["rel"]).stem.lower() == stem]
         chosen = _match_by_time(photo, candidates, used_videos)
         if chosen:
             used_videos.add(chosen["rel"])
@@ -119,8 +119,8 @@ def pair_live(index_rows: List[Dict[str, object]]) -> List[LiveGroup]:
     for photo in photos.values():
         if photo["rel"] in matched:
             continue
-        folder = str(Path(photo["rel"]).parent)
-        candidates = [v for v in videos.values() if str(Path(v["rel"]).parent) == folder]
+        folder = Path(photo["rel"]).parent.as_posix().lower()
+        candidates = [v for v in videos.values() if Path(v["rel"]).parent.as_posix().lower() == folder]
         chosen = _match_by_time(photo, candidates, used_videos)
         if chosen:
             used_videos.add(chosen["rel"])

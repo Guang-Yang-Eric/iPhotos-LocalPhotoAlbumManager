@@ -88,11 +88,26 @@ class NavigationCoordinator(QObject):
         # Watcher integration
         self._context.library.treeUpdated.connect(self.handle_tree_updated)
 
+    def _exit_cluster_gallery_mode(self) -> None:
+        """Reset cluster gallery state when navigating away.
+
+        Must be called in every navigation method that switches views so the
+        back-button header added by ``open_cluster_gallery`` is properly
+        hidden when the user navigates to a different section.
+        """
+        if not self._in_cluster_gallery:
+            return
+        self._in_cluster_gallery = False
+        gallery_page = self._router.gallery_page()
+        if gallery_page is not None:
+            gallery_page.set_cluster_gallery_mode(False)
+
     def open_album(self, path: Path):
         """Loads an album and switches to gallery view."""
         if self._should_treat_as_refresh(path):
             return
 
+        self._exit_cluster_gallery_mode()
         self._reset_playback()
         self._static_selection = None
         self._router.show_gallery()
@@ -123,6 +138,7 @@ class NavigationCoordinator(QObject):
 
     def open_all_photos(self):
         """Loads all photos."""
+        self._exit_cluster_gallery_mode()
         self._reset_playback()
         self._router.show_gallery()
         self._static_selection = AlbumSidebar.ALL_PHOTOS_TITLE
@@ -139,6 +155,7 @@ class NavigationCoordinator(QObject):
         elif normalized == "recently deleted":
             self.open_recently_deleted()
         elif normalized == "albums":
+            self._exit_cluster_gallery_mode()
             self._reset_playback()
             self._router.show_albums_dashboard()
             self._static_selection = "Albums"
@@ -167,6 +184,7 @@ class NavigationCoordinator(QObject):
             LOGGER.error(f"Failed to open trash: {exc}")
             return
 
+        self._exit_cluster_gallery_mode()
         self._reset_playback()
         self._router.show_gallery()
         self._static_selection = "Recently Deleted"
@@ -186,6 +204,7 @@ class NavigationCoordinator(QObject):
         self._asset_vm.load_query(query)
 
     def _open_filtered_collection(self, title: str, is_favorite=None, media_types=None):
+        self._exit_cluster_gallery_mode()
         self._reset_playback()
         self._router.show_gallery()
         self._static_selection = title

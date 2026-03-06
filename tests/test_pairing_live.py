@@ -135,3 +135,51 @@ def test_pairing_prefers_better_duration_score() -> None:
 
     # We expect 'good.MOV' to be selected.
     assert group.motion == "good.MOV", f"Expected good.MOV but got {group.motion}"
+
+
+def test_pairing_case_insensitive_stem_matching() -> None:
+    """Stem matching must be case-insensitive (Linux file systems are case-sensitive)."""
+    dt = iso(datetime(2024, 6, 15, 10, 0, 0))
+    rows = [
+        {
+            "rel": "DCIM/IMG_1234.HEIC",
+            "mime": "image/heic",
+            "dt": dt,
+        },
+        {
+            "rel": "DCIM/img_1234.MOV",
+            "mime": "video/quicktime",
+            "dt": dt,
+            "dur": 2.0,
+        },
+    ]
+    groups = pair_live(rows)
+    assert len(groups) == 1
+    group = groups[0]
+    assert group.still == "DCIM/IMG_1234.HEIC"
+    assert group.motion == "DCIM/img_1234.MOV"
+
+
+def test_pairing_case_insensitive_directory_matching() -> None:
+    """Directory proximity matching must be case-insensitive."""
+    dt1 = iso(datetime(2024, 6, 15, 10, 0, 0))
+    dt2 = iso(datetime(2024, 6, 15, 10, 0, 1))
+    rows = [
+        {
+            "rel": "DCIM/Photos/IMG_5678.HEIC",
+            "mime": "image/heic",
+            "dt": dt1,
+        },
+        {
+            # Different stem so stage-2 won't match; same folder (different case)
+            "rel": "DCIM/photos/VID_9999.MOV",
+            "mime": "video/quicktime",
+            "dt": dt2,
+            "dur": 2.0,
+        },
+    ]
+    groups = pair_live(rows)
+    assert len(groups) == 1
+    group = groups[0]
+    assert group.still == "DCIM/Photos/IMG_5678.HEIC"
+    assert group.motion == "DCIM/photos/VID_9999.MOV"
