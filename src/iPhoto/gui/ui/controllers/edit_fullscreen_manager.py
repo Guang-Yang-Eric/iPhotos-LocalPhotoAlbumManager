@@ -49,6 +49,8 @@ class EditFullscreenManager(QObject):
         # Record the edit sidebar's width constraints so we can temporarily
         # relax them and then reinstate the user's customisation when exiting.
         self._fullscreen_edit_sidebar_constraints: tuple[int, int] | None = None
+        self._fullscreen_right_panel_margins: tuple[int, int, int, int] | None = None
+        self._fullscreen_splitter_handle_width: int | None = None
 
     # ------------------------------------------------------------------
     # Public API used by :class:`EditController`
@@ -174,6 +176,7 @@ class EditFullscreenManager(QObject):
         if total <= 0:
             total = max(1, splitter.width())
         splitter.setSizes([0, total])
+        self._apply_edge_to_edge_content_layout()
 
         self._window.showFullScreen()
 
@@ -246,6 +249,7 @@ class EditFullscreenManager(QObject):
         if self._fullscreen_splitter_sizes:
             self._ui.splitter.setSizes(self._fullscreen_splitter_sizes)
         self._fullscreen_splitter_sizes = None
+        self._restore_content_layout()
 
         self._fullscreen_active = False
 
@@ -354,3 +358,28 @@ class EditFullscreenManager(QObject):
 
         return scaled
 
+    def _apply_edge_to_edge_content_layout(self) -> None:
+        layout = getattr(self._ui, "right_panel_layout", None)
+        if layout is not None and self._fullscreen_right_panel_margins is None:
+            margins = layout.contentsMargins()
+            self._fullscreen_right_panel_margins = (
+                margins.left(),
+                margins.top(),
+                margins.right(),
+                margins.bottom(),
+            )
+            layout.setContentsMargins(0, 0, 0, 0)
+
+        if self._fullscreen_splitter_handle_width is None:
+            self._fullscreen_splitter_handle_width = self._ui.splitter.handleWidth()
+            self._ui.splitter.setHandleWidth(0)
+
+    def _restore_content_layout(self) -> None:
+        layout = getattr(self._ui, "right_panel_layout", None)
+        if layout is not None and self._fullscreen_right_panel_margins is not None:
+            layout.setContentsMargins(*self._fullscreen_right_panel_margins)
+        self._fullscreen_right_panel_margins = None
+
+        if self._fullscreen_splitter_handle_width is not None:
+            self._ui.splitter.setHandleWidth(self._fullscreen_splitter_handle_width)
+        self._fullscreen_splitter_handle_width = None

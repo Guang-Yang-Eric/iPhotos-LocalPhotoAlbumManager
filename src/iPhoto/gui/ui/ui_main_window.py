@@ -183,6 +183,8 @@ class Ui_MainWindow(object):
         right_panel.setAutoFillBackground(True)
         right_layout = QVBoxLayout(right_panel)
         right_layout.setContentsMargins(8, 8, 8, 8)
+        self.right_panel = right_panel
+        self.right_panel_layout = right_layout
 
         self.view_stack = QStackedWidget()
         map_page = QWidget()

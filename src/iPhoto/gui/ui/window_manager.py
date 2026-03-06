@@ -83,6 +83,8 @@ class FramelessWindowManager(QObject):
         self._window_shell_stylesheet = self._ui.window_shell.styleSheet()
         self._player_container_stylesheet = self._ui.player_container.styleSheet()
         self._player_stack_stylesheet = self._ui.player_stack.styleSheet()
+        self._right_panel_margins_before: tuple[int, int, int, int] | None = None
+        self._splitter_handle_width_before: int | None = None
         self._immersive_background_applied = False
         self._immersive_visibility_targets = self._build_immersive_targets()
 
@@ -258,6 +260,7 @@ class FramelessWindowManager(QObject):
             )
             self._ui.video_area.hide_controls(animate=False)
             self._ui.splitter.setSizes([0, sum(self._splitter_sizes or [self._window.width()])])
+            self._apply_edge_to_edge_content_layout()
 
         self._apply_immersive_backdrop()
 
@@ -297,6 +300,7 @@ class FramelessWindowManager(QObject):
                 self._window.setWindowState(self._previous_window_state)
             if self._splitter_sizes:
                 self._ui.splitter.setSizes(self._splitter_sizes)
+            self._restore_content_layout()
 
             for widget, was_visible in self._hidden_widget_states:
                 widget.setVisible(was_visible)
@@ -621,6 +625,32 @@ class FramelessWindowManager(QObject):
             self._ui.filmstrip_view,
         )
         return tuple(widget for widget in candidates if widget is not None)
+
+    def _apply_edge_to_edge_content_layout(self) -> None:
+        layout = getattr(self._ui, "right_panel_layout", None)
+        if layout is not None and self._right_panel_margins_before is None:
+            margins = layout.contentsMargins()
+            self._right_panel_margins_before = (
+                margins.left(),
+                margins.top(),
+                margins.right(),
+                margins.bottom(),
+            )
+            layout.setContentsMargins(0, 0, 0, 0)
+
+        if self._splitter_handle_width_before is None:
+            self._splitter_handle_width_before = self._ui.splitter.handleWidth()
+            self._ui.splitter.setHandleWidth(0)
+
+    def _restore_content_layout(self) -> None:
+        layout = getattr(self._ui, "right_panel_layout", None)
+        if layout is not None and self._right_panel_margins_before is not None:
+            layout.setContentsMargins(*self._right_panel_margins_before)
+        self._right_panel_margins_before = None
+
+        if self._splitter_handle_width_before is not None:
+            self._ui.splitter.setHandleWidth(self._splitter_handle_width_before)
+        self._splitter_handle_width_before = None
 
     def _build_menu_styles(self) -> tuple[str, str]:
         palette = self._rounded_shell.palette()
