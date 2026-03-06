@@ -13,6 +13,16 @@ from .asset_grid import AssetGrid
 from ..models.roles import Roles
 
 
+# Delay (ms) for the second deferred viewport update after GL initialisation.
+# The first update fires at 0 ms; this covers async thumbnail data arriving
+# shortly after the context becomes usable.
+_GL_INIT_DEFERRED_MS = 100
+
+# Delay (ms) for the second update after a model reset.  Async thumbnails
+# may arrive slightly after the reset completes.
+_MODEL_RESET_DEFERRED_MS = 50
+
+
 class GalleryViewport(QOpenGLWidget):
     """OpenGL viewport that ensures an opaque background."""
 
@@ -44,7 +54,7 @@ class GalleryViewport(QOpenGLWidget):
 
         self.clear_background()
         QTimer.singleShot(0, self.update)
-        QTimer.singleShot(100, self.update)
+        QTimer.singleShot(_GL_INIT_DEFERRED_MS, self.update)
 
     def paintGL(self) -> None:
         """Clear the background to the theme's base color with full opacity."""
@@ -250,7 +260,7 @@ class GalleryGridView(AssetGrid):
         viewport = self.viewport()
         if viewport is not None:
             QTimer.singleShot(0, viewport.update)
-            QTimer.singleShot(50, viewport.update)
+            QTimer.singleShot(_MODEL_RESET_DEFERRED_MS, viewport.update)
 
     def _on_data_changed(self, top_left, bottom_right, roles=None) -> None:
         """Ensure a full viewport repaint when item data changes.
