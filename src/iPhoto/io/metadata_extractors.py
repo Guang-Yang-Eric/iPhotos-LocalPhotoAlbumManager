@@ -270,18 +270,20 @@ def _extract_datetime_from_exiftool(meta: Dict[str, Any]) -> Optional[str]:
 
 
 def _extract_content_id_from_exiftool(meta: Dict[str, Any]) -> Optional[str]:
-    """Extract the Apple ``ContentIdentifier`` used for Live Photo pairing."""
+    """Extract the Apple ``ContentIdentifier`` used for Live Photo pairing.
 
-    apple_group = _extract_group(meta, "Apple")
-    if apple_group:
-        content_id = apple_group.get("ContentIdentifier")
-        if isinstance(content_id, str) and content_id:
-            return content_id
+    iOS devices store the ContentIdentifier in different ExifTool groups
+    depending on the file format:
+    * HEIC still images → ``MakerNotes:ContentIdentifier``
+    * MOV motion clips  → ``QuickTime:ContentIdentifier``
+    * Some older assets  → ``Apple:ContentIdentifier``
+    """
 
-    quicktime = _extract_group(meta, "QuickTime")
-    if quicktime:
-        content_id = quicktime.get("ContentIdentifier")
-        if isinstance(content_id, str) and content_id:
-            return content_id
+    for group_name in ("MakerNotes", "Apple", "QuickTime"):
+        group = _extract_group(meta, group_name)
+        if group:
+            content_id = group.get("ContentIdentifier")
+            if isinstance(content_id, str) and content_id:
+                return content_id
 
     return None

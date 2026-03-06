@@ -207,12 +207,33 @@ class GalleryGridView(AssetGrid):
                 previous.rowsRemoved.disconnect(self._update_empty_state)
             except (RuntimeError, TypeError):
                 pass
+            try:
+                previous.dataChanged.disconnect(self._schedule_viewport_repaint)
+            except (RuntimeError, TypeError):
+                pass
         super().setModel(model)
         if model is not None:
             model.modelReset.connect(self._update_empty_state)
             model.rowsInserted.connect(self._update_empty_state)
             model.rowsRemoved.connect(self._update_empty_state)
+            # QOpenGLWidget viewports on Linux may not repaint automatically
+            # when ``dataChanged`` fires (e.g. after a thumbnail is delivered
+            # from a background thread).  Scheduling an explicit viewport
+            # repaint ensures every decoration update is reflected promptly.
+            model.dataChanged.connect(self._schedule_viewport_repaint)
         self._update_empty_state()
+
+    def _schedule_viewport_repaint(self, *_args: object) -> None:
+        """Ask the viewport to repaint after a model data change.
+
+        On Linux (GLX/EGL) ``QOpenGLWidget.update()`` can silently skip
+        repaint requests that originate from cross-thread signal chains.
+        Coalescing into a zero-timer ensures the call is processed in the
+        next event loop iteration on the main thread.
+        """
+        viewport = self.viewport()
+        if isinstance(viewport, QOpenGLWidget):
+            QTimer.singleShot(0, viewport.update)
 
     def _update_empty_state(self) -> None:
         model = self.model()
