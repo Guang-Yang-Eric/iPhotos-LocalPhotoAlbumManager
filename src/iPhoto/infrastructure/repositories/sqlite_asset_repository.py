@@ -276,7 +276,7 @@ class SQLiteAssetRepository(IAssetRepository):
             if includes_live and not includes_image:
                 media_clauses.append(
                     "("
-                    "(live_role = 0 AND live_partner_rel IS NOT NULL)"
+                    "((live_role IS NULL OR live_role = 0) AND live_partner_rel IS NOT NULL)"
                     " OR "
                     "(live_photo_group_id IS NOT NULL AND media_type != 1)"
                     ")"
@@ -388,8 +388,13 @@ class SQLiteAssetRepository(IAssetRepository):
         if live_role is not None:
             meta["live_role"] = live_role
 
-        if not live_group and live_partner_rel and live_role != 1:
-            live_group = live_partner_rel
+        # Build a synthetic group when the dedicated column is empty but
+        # pairing data is available — either from the column or from the
+        # metadata JSON.
+        effective_partner = live_partner_rel or meta.get("live_partner_rel")
+        effective_role = live_role if live_role is not None else meta.get("live_role")
+        if not live_group and effective_partner and effective_role != 1:
+            live_group = effective_partner
 
         return Asset(
             id=row["id"],

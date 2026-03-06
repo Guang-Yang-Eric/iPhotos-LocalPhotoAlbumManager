@@ -37,12 +37,14 @@ class GalleryViewport(QOpenGLWidget):
 
         On Linux the first paint may execute before the OpenGL context is
         fully usable, which can leave the first visible thumbnail blank.
-        Scheduling a deferred update guarantees a
-        complete repaint once the context is ready.
+        Scheduling deferred updates at both 0 ms and 100 ms guarantees a
+        complete repaint once the context is ready, even when asynchronous
+        thumbnail data arrives shortly after initialisation.
         """
 
         self.clear_background()
         QTimer.singleShot(0, self.update)
+        QTimer.singleShot(100, self.update)
 
     def paintGL(self) -> None:
         """Clear the background to the theme's base color with full opacity."""
@@ -197,14 +199,14 @@ class GalleryGridView(AssetGrid):
     def setModel(self, model) -> None:  # type: ignore[override]
         previous = self.model()
         if previous is not None:
-            try:
-                previous.modelReset.disconnect(self._update_empty_state)
-            except (RuntimeError, TypeError):
-                pass
-            try:
-                previous.modelReset.disconnect(self._deferred_viewport_update)
-            except (RuntimeError, TypeError):
-                pass
+            for slot in (
+                self._update_empty_state,
+                self._deferred_viewport_update,
+            ):
+                try:
+                    previous.modelReset.disconnect(slot)
+                except (RuntimeError, TypeError):
+                    pass
             try:
                 previous.rowsInserted.disconnect(self._update_empty_state)
             except (RuntimeError, TypeError):
@@ -213,12 +215,17 @@ class GalleryGridView(AssetGrid):
                 previous.rowsRemoved.disconnect(self._update_empty_state)
             except (RuntimeError, TypeError):
                 pass
+            try:
+                previous.dataChanged.disconnect(self._on_data_changed)
+            except (RuntimeError, TypeError):
+                pass
         super().setModel(model)
         if model is not None:
             model.modelReset.connect(self._update_empty_state)
             model.modelReset.connect(self._deferred_viewport_update)
             model.rowsInserted.connect(self._update_empty_state)
             model.rowsRemoved.connect(self._update_empty_state)
+            model.dataChanged.connect(self._on_data_changed)
         self._update_empty_state()
 
     def _update_empty_state(self) -> None:
@@ -236,6 +243,24 @@ class GalleryGridView(AssetGrid):
         ``dataChanged`` may not reliably repaint the first visible item.
         Scheduling a deferred ``update()`` after the model has been reset
         ensures every visible cell is redrawn once the new data is available.
+        A second, slightly delayed update covers the common case where async
+        thumbnail data arrives shortly after the model reset completes.
+        """
+
+        viewport = self.viewport()
+        if viewport is not None:
+            QTimer.singleShot(0, viewport.update)
+            QTimer.singleShot(50, viewport.update)
+
+    def _on_data_changed(self, top_left, bottom_right, roles=None) -> None:
+        """Ensure a full viewport repaint when item data changes.
+
+        On Linux with an OpenGL viewport, the partial-update path for
+        ``dataChanged`` may only repaint a sub-region of the affected cell,
+        causing overlay badges (live photo, video duration) to disappear or
+        the thumbnail itself to remain blank for the first visible item.
+        Scheduling a deferred full viewport ``update()`` guarantees that the
+        complete cell — including all badges — is redrawn.
         """
 
         viewport = self.viewport()
