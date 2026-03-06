@@ -34,6 +34,59 @@ else:  # pragma: no cover - exercised only when Pillow is missing
 LOGGER = get_logger()
 
 
+import re as _re
+
+# Pattern for ExifTool duration strings like ``"2.50 s"`` or ``"12.5"``.
+_EXIFTOOL_DUR_UNIT_RE = _re.compile(r"^([\d.]+)\s*s?$", _re.IGNORECASE)
+# Pattern for ``H:MM:SS`` / ``MM:SS`` time-code strings.
+_EXIFTOOL_DUR_HMS_RE = _re.compile(r"^(?:(\d+):)?(\d{1,2}):(\d{2})(?:\.(\d+))?$")
+
+
+def _parse_exiftool_duration(raw: object) -> Optional[float]:
+    """Parse an ExifTool duration value to seconds.
+
+    ExifTool reports ``Duration`` in several formats depending on the
+    container and version:
+    * ``2.50 s`` — seconds with unit suffix
+    * ``"2.50"`` — bare number as string
+    * ``2.5`` — already a numeric value
+    * ``"0:02:30"`` — time-code ``H:MM:SS`` or ``MM:SS``
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, (int, float)):
+        return float(raw) if raw > 0 else None
+    if not isinstance(raw, str):
+        return None
+    raw = raw.strip()
+    if not raw:
+        return None
+
+    # Try ``"12.5 s"`` / ``"12.5"`` first.
+    m = _EXIFTOOL_DUR_UNIT_RE.match(raw)
+    if m:
+        try:
+            return float(m.group(1))
+        except ValueError:
+            return None
+
+    # Try ``H:MM:SS`` / ``MM:SS`` time-code.
+    m = _EXIFTOOL_DUR_HMS_RE.match(raw)
+    if m:
+        hours = int(m.group(1) or 0)
+        minutes = int(m.group(2))
+        seconds = int(m.group(3))
+        frac = float(f"0.{m.group(4)}") if m.group(4) else 0.0
+        return hours * 3600 + minutes * 60 + seconds + frac
+
+    # Last resort: attempt a plain ``float()`` conversion.
+    try:
+        val = float(raw)
+        return val if val > 0 else None
+    except ValueError:
+        return None
+
+
 def read_image_meta_with_exiftool(
     path: Path, metadata: Optional[Dict[str, Any]]
 ) -> Dict[str, Any]:
@@ -307,6 +360,22 @@ def read_video_meta(path: Path, metadata: Optional[Dict[str, Any]] = None) -> Di
         )
         if lens_value is not None:
             info["lens"] = lens_value
+
+        # Extract duration from ExifTool as a fallback when FFprobe is
+        # unavailable (common on Linux where FFprobe may not be installed).
+        # ExifTool reports ``Duration`` as e.g. ``"2.50 s"`` or ``"0:02:30"``.
+        exiftool_dur = _parse_exiftool_duration(
+            quicktime_group.get("Duration")
+            or composite_group.get("Duration")
+        )
+        if exiftool_dur is not None and exiftool_dur > 0:
+            info["dur"] = exiftool_dur
+
+        # Dimensions from ExifTool when FFprobe is unavailable
+        for dim_key, info_key in (("ImageWidth", "w"), ("ImageHeight", "h")):
+            val = quicktime_group.get(dim_key) or composite_group.get(dim_key)
+            if isinstance(val, int) and val > 0:
+                info[info_key] = val
 
     try:
         ffprobe_meta = probe_media(path)
