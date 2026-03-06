@@ -33,6 +33,12 @@ from iPhoto.io.metadata import _parse_exiftool_duration
         ("   ", None),
         (0, None),
         (-5.0, None),
+        # Invalid time-code ranges (minutes/seconds >= 60)
+        ("99:99", None),
+        ("0:60:00", None),
+        ("0:00:60", None),
+        # Multiple decimal points (should fall through to float fallback)
+        ("1.2.3", None),
     ],
 )
 def test_parse_exiftool_duration(raw, expected):

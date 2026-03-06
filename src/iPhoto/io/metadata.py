@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re as _re
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -33,11 +34,8 @@ else:  # pragma: no cover - exercised only when Pillow is missing
 
 LOGGER = get_logger()
 
-
-import re as _re
-
 # Pattern for ExifTool duration strings like ``"2.50 s"`` or ``"12.5"``.
-_EXIFTOOL_DUR_UNIT_RE = _re.compile(r"^([\d.]+)\s*s?$", _re.IGNORECASE)
+_EXIFTOOL_DUR_UNIT_RE = _re.compile(r"^(\d+(?:\.\d+)?)\s*s?$", _re.IGNORECASE)
 # Pattern for ``H:MM:SS`` / ``MM:SS`` time-code strings.
 _EXIFTOOL_DUR_HMS_RE = _re.compile(r"^(?:(\d+):)?(\d{1,2}):(\d{2})(?:\.(\d+))?$")
 
@@ -76,6 +74,8 @@ def _parse_exiftool_duration(raw: object) -> Optional[float]:
         hours = int(m.group(1) or 0)
         minutes = int(m.group(2))
         seconds = int(m.group(3))
+        if minutes >= 60 or seconds >= 60:
+            return None
         frac = float(f"0.{m.group(4)}") if m.group(4) else 0.0
         return hours * 3600 + minutes * 60 + seconds + frac
 
