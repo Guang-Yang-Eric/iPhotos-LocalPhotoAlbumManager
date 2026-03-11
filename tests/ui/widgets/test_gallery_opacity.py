@@ -8,6 +8,8 @@ treats their backing stores as ARGB textures whose async upload can race with
 scroll repaints, producing visible tearing on Linux.
 """
 
+import sys
+
 import pytest
 
 pytest.importorskip("PySide6", reason="PySide6 is required for GUI tests", exc_type=ImportError)
@@ -59,3 +61,44 @@ def test_gallery_grid_view_no_double_painter(qapp: QApplication) -> None:
     # If GalleryGridView defines its own paintEvent, it would shadow the base
     # class method. Verify it does not.
     assert "paintEvent" not in GalleryGridView.__dict__
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="GL viewport is Linux-only")
+def test_gallery_grid_view_uses_gl_viewport_on_linux(qapp: QApplication) -> None:
+    """On Linux the viewport must be a QOpenGLWidget for FBO double-buffering.
+
+    The main window uses ``WA_TranslucentBackground`` which forces an ARGB
+    backing store.  A standard QWidget viewport shares this backing store and
+    the compositor can read it mid-paint, causing garbled pixel blocks.
+    ``QOpenGLWidget`` renders into its own FBO so only completed frames are
+    submitted to the compositor.
+    """
+    try:
+        from PySide6.QtOpenGLWidgets import QOpenGLWidget
+    except ImportError:
+        pytest.skip("QOpenGLWidget not available")
+
+    view = GalleryGridView()
+    assert isinstance(view.viewport(), QOpenGLWidget)
+
+
+def test_gallery_grid_view_schedules_viewport_repaint_on_data_change(qapp: QApplication) -> None:
+    """setModel must wire dataChanged → _schedule_viewport_repaint on Linux."""
+    from unittest.mock import patch, MagicMock
+
+    from PySide6.QtGui import QStandardItemModel, QStandardItem
+
+    view = GalleryGridView()
+    model = QStandardItemModel()
+    for i in range(5):
+        model.appendRow(QStandardItem(f"item-{i}"))
+
+    with patch(
+        "iPhoto.gui.ui.widgets.gallery_grid_view._IS_LINUX", True
+    ):
+        view.setModel(model)
+
+    with patch.object(view, "_schedule_viewport_repaint") as mock_repaint:
+        idx = model.index(0, 0)
+        model.setData(idx, "changed")
+        mock_repaint.assert_called()

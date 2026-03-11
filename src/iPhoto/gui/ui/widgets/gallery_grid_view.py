@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QRect, QSize, Qt, Signal, QPoint
+import sys
+
+from PySide6.QtCore import QEvent, QRect, QSize, Qt, QTimer, Signal, QPoint
 from PySide6.QtGui import QMouseEvent, QPalette, QGuiApplication
 from PySide6.QtWidgets import QAbstractItemView, QListView, QLabel
 
 from ..styles import modern_scrollbar_style
 from .asset_grid import AssetGrid
 from ..models.roles import Roles
+
+_IS_LINUX = sys.platform == "linux"
 
 
 class GalleryGridView(AssetGrid):
@@ -45,6 +49,22 @@ class GalleryGridView(AssetGrid):
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.setWordWrap(False)
         self.setSelectionRectVisible(False)
+
+        if _IS_LINUX:
+            # Use a QOpenGLWidget as the viewport for FBO-based double
+            # buffering.  The main window uses WA_TranslucentBackground for
+            # frameless chrome, which forces an ARGB backing store for the
+            # entire window.  The compositor may read that shared backing
+            # store mid-paint, producing garbled pixel blocks and tearing.
+            # A QOpenGLWidget renders into its own FBO; only the completed
+            # frame is blitted to the window surface, so the compositor
+            # never sees a partial paint.
+            try:
+                from PySide6.QtOpenGLWidgets import QOpenGLWidget
+
+                self.setViewport(QOpenGLWidget())
+            except ImportError:
+                pass
 
         # Block the WA_TranslucentBackground cascade so the GL texture
         # compositor (active when QRhiWidget exists on the detail page)
@@ -166,11 +186,22 @@ class GalleryGridView(AssetGrid):
                 previous.rowsRemoved.disconnect(self._update_empty_state)
             except (RuntimeError, TypeError):
                 pass
+            if _IS_LINUX:
+                try:
+                    previous.dataChanged.disconnect(self._schedule_viewport_repaint)
+                except (RuntimeError, TypeError):
+                    pass
         super().setModel(model)
         if model is not None:
             model.modelReset.connect(self._update_empty_state)
             model.rowsInserted.connect(self._update_empty_state)
             model.rowsRemoved.connect(self._update_empty_state)
+            if _IS_LINUX:
+                # QOpenGLWidget repaints may not be triggered automatically by
+                # dataChanged signals originating from background threads.
+                # Schedule a deferred viewport update to ensure newly loaded
+                # thumbnails become visible.
+                model.dataChanged.connect(self._schedule_viewport_repaint)
         self._update_empty_state()
 
     def _update_empty_state(self) -> None:
@@ -180,6 +211,16 @@ class GalleryGridView(AssetGrid):
             return
         self._empty_label.setGeometry(self.viewport().rect())
         self._empty_label.setVisible(is_empty)
+
+    def _schedule_viewport_repaint(self) -> None:
+        """Schedule a deferred viewport repaint.
+
+        When the gallery viewport is a ``QOpenGLWidget``, ``dataChanged``
+        signals emitted from background thumbnail threads may not trigger
+        an automatic GL repaint.  Posting a zero-delay timer ensures the
+        repaint runs in the next event-loop iteration on the main thread.
+        """
+        QTimer.singleShot(0, self.viewport().update)
 
     # ------------------------------------------------------------------
     # Selection mode toggling
