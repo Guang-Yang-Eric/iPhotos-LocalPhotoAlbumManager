@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 
-from PySide6.QtCore import QEvent, QModelIndex, QSize, Qt, Signal, QTimer, QItemSelectionModel
+from PySide6.QtCore import QEvent, QModelIndex, QObject, QSize, Qt, Signal, QTimer, QItemSelectionModel
 from PySide6.QtGui import QPalette, QResizeEvent, QWheelEvent
 from PySide6.QtWidgets import QListView, QSizePolicy, QStyleOptionViewItem
 
@@ -359,7 +359,7 @@ class FilmstripView(AssetGrid):
     # ------------------------------------------------------------------
     # Event handling
     # ------------------------------------------------------------------
-    def eventFilter(self, watched, event):  # type: ignore[override]
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # type: ignore[override]
         """Forward viewport wheel events to *wheelEvent* on Linux.
 
         On Linux the default event propagation from the viewport to the parent

@@ -159,8 +159,7 @@ def test_non_viewport_event_passes_through(qapp: QApplication) -> None:
 def test_non_wheel_event_passes_through(qapp: QApplication) -> None:
     """Non-wheel events on the viewport should not be intercepted."""
     view = _make_filmstrip(qapp)
-    from PySide6.QtCore import QEvent as _QE
 
-    event = _QE(_QE.Type.MouseButtonPress)
+    event = QEvent(QEvent.Type.MouseButtonPress)
     handled = view.eventFilter(view.viewport(), event)
     assert not handled
