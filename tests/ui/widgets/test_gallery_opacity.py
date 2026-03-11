@@ -46,3 +46,16 @@ def test_gallery_grid_view_blocks_translucent_cascade(qapp: QApplication) -> Non
     vp = view.viewport()
     assert not vp.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
     assert vp.autoFillBackground()
+
+
+def test_gallery_grid_view_no_double_painter(qapp: QApplication) -> None:
+    """GalleryGridView must NOT override paintEvent.
+
+    A second QPainter on the viewport after the base class has flushed its
+    painter corrupts the GL backing texture when the texture-based compositor
+    is active (triggered by QRhiWidget on the detail page).  Verify that
+    ``paintEvent`` is NOT overridden in GalleryGridView.
+    """
+    # If GalleryGridView defines its own paintEvent, it would shadow the base
+    # class method. Verify it does not.
+    assert "paintEvent" not in GalleryGridView.__dict__

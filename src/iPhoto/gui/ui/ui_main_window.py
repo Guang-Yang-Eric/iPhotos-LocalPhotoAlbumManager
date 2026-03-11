@@ -180,11 +180,15 @@ class Ui_MainWindow(object):
 
         right_panel = QWidget()
         right_panel.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        right_panel.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
         right_panel.setAutoFillBackground(True)
         right_layout = QVBoxLayout(right_panel)
         right_layout.setContentsMargins(8, 8, 8, 8)
 
         self.view_stack = QStackedWidget()
+        self.view_stack.setAttribute(
+            Qt.WidgetAttribute.WA_TranslucentBackground, False,
+        )
         map_page = QWidget()
         map_layout = QVBoxLayout(map_page)
         map_layout.setContentsMargins(0, 0, 0, 0)
