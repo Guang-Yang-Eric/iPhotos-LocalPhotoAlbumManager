@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sys
+
 from PySide6.QtCore import QEvent, QModelIndex, QSize, Qt, Signal, QTimer, QItemSelectionModel
 from PySide6.QtGui import QPalette, QResizeEvent, QWheelEvent
 from PySide6.QtWidgets import QListView, QSizePolicy, QStyleOptionViewItem
@@ -9,6 +11,8 @@ from PySide6.QtWidgets import QListView, QSizePolicy, QStyleOptionViewItem
 from .asset_grid import AssetGrid
 from ..models.roles import Roles
 from ..styles import modern_scrollbar_style
+
+_IS_LINUX = sys.platform == "linux"
 
 
 class FilmstripView(AssetGrid):
@@ -53,6 +57,9 @@ class FilmstripView(AssetGrid):
         self._last_known_center_row: int | None = None
         self._restore_scheduled = False
         self._apply_scrollbar_style()
+
+        if _IS_LINUX:
+            self.viewport().installEventFilter(self)
 
     def changeEvent(self, event: QEvent) -> None:
         if event.type() == QEvent.Type.PaletteChange:
@@ -352,6 +359,20 @@ class FilmstripView(AssetGrid):
     # ------------------------------------------------------------------
     # Event handling
     # ------------------------------------------------------------------
+    def eventFilter(self, watched, event):  # type: ignore[override]
+        """Forward viewport wheel events to *wheelEvent* on Linux.
+
+        On Linux the default event propagation from the viewport to the parent
+        ``QAbstractScrollArea`` may not deliver ``QWheelEvent`` to the Python
+        override of ``wheelEvent``.  Catching the event in a viewport filter
+        mirrors the approach already used in ``ImageViewerBase`` and ensures
+        scroll-wheel navigation works reliably across platforms.
+        """
+        if watched is self.viewport() and event.type() == QEvent.Type.Wheel:
+            self.wheelEvent(event)
+            return event.isAccepted()
+        return super().eventFilter(watched, event)
+
     def wheelEvent(self, event: QWheelEvent) -> None:  # type: ignore[override]
         """Always request navigation when the user scrolls over the filmstrip.
 
