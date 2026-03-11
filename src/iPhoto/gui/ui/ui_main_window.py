@@ -186,9 +186,7 @@ class Ui_MainWindow(object):
         right_layout.setContentsMargins(8, 8, 8, 8)
 
         self.view_stack = QStackedWidget()
-        self.view_stack.setAttribute(
-            Qt.WidgetAttribute.WA_TranslucentBackground, False,
-        )
+        self.view_stack.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
         map_page = QWidget()
         map_layout = QVBoxLayout(map_page)
         map_layout.setContentsMargins(0, 0, 0, 0)
