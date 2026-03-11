@@ -46,11 +46,19 @@ class GalleryGridView(AssetGrid):
         self.setWordWrap(False)
         self.setSelectionRectVisible(False)
 
+        # Block the WA_TranslucentBackground cascade so the GL texture
+        # compositor (active when QRhiWidget exists on the detail page)
+        # treats this view and its viewport as opaque surfaces.  Without
+        # this the ARGB texture upload can race with scroll repaints and
+        # produce visible tearing on Linux.
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
+
         # Ensure the viewport paints an opaque background so the gallery is not
         # transparent when the main window uses WA_TranslucentBackground for
         # frameless chrome.
         vp = self.viewport()
         vp.setAutoFillBackground(True)
+        vp.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
 
         self._empty_label = QLabel(
             "No media found. Click Rescan to scan this library.",

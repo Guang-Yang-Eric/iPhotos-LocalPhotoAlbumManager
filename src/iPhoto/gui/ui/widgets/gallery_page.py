@@ -20,6 +20,15 @@ class GalleryPageWidget(QWidget):
         super().__init__(parent)
         self.setObjectName("galleryPage")
 
+        # Block the WA_TranslucentBackground cascade from the main window so
+        # the gallery page always composites as an opaque surface.  Without
+        # this, the GL-based texture compositor (activated by QRhiWidget
+        # instances on the detail page) uses ARGB textures for the gallery
+        # viewport, and the async texture upload races with scroll repaints
+        # producing visible tearing on Linux.
+        self.setAutoFillBackground(True)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
