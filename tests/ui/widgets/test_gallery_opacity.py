@@ -84,7 +84,7 @@ def test_gallery_grid_view_uses_gl_viewport_on_linux(qapp: QApplication) -> None
 
 def test_gallery_grid_view_schedules_viewport_repaint_on_data_change(qapp: QApplication) -> None:
     """setModel must wire dataChanged → _schedule_viewport_repaint on Linux."""
-    from unittest.mock import patch, MagicMock
+    from unittest.mock import patch
 
     from PySide6.QtGui import QStandardItemModel, QStandardItem
 
@@ -98,7 +98,20 @@ def test_gallery_grid_view_schedules_viewport_repaint_on_data_change(qapp: QAppl
     ):
         view.setModel(model)
 
+    # Verify the connection fires _schedule_viewport_repaint.
     with patch.object(view, "_schedule_viewport_repaint") as mock_repaint:
         idx = model.index(0, 0)
         model.setData(idx, "changed")
         mock_repaint.assert_called()
+
+
+def test_schedule_viewport_repaint_posts_deferred_update(qapp: QApplication) -> None:
+    """_schedule_viewport_repaint must post a deferred viewport().update()."""
+    from unittest.mock import patch
+
+    view = GalleryGridView()
+    vp = view.viewport()
+
+    with patch("iPhoto.gui.ui.widgets.gallery_grid_view.QTimer") as mock_timer:
+        view._schedule_viewport_repaint()
+        mock_timer.singleShot.assert_called_once_with(0, vp.update)
