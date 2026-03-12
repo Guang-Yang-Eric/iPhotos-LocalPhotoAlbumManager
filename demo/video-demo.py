@@ -58,6 +58,7 @@ PYAV_MAX_WORKERS = 4
 # Max concurrent ffmpeg slices for the sliced subprocess strategy
 MAX_FFMPEG_SLICES = 3
 # Extra frames to read beyond expected count (fps filter rounding tolerance)
+FRAME_READ_BUFFER = 3
 
 # Hardware pixel formats reported by PyAV for GPU-decoded frames.
 # When a frame uses one of these formats, it must be reformatted (GPU→CPU
@@ -65,7 +66,6 @@ MAX_FFMPEG_SLICES = 3
 _HW_PIX_FMTS = frozenset({
     'cuda', 'dxva2', 'd3d11', 'vaapi', 'vdpau', 'qsv', 'videotoolbox',
 })
-FRAME_READ_BUFFER = 3
 
 # --- 3. 样式表 (QSS) ---
 STYLESHEET = f"""
@@ -248,7 +248,7 @@ def _pyav_open_with_hw(video_path):
                           allow_software_fallback=True)
             container = _av_module.open(video_path, hwaccel=hw)
             stream = container.streams.video[0]
-            print("[pyav] Opened with CUDA hwaccel")
+            print("[pyav] Opened with CUDA hwaccel (may use software fallback)")
             return container, stream
         except Exception as e:
             # HWAccel init failed (e.g. no CUDA driver) — fall through
@@ -469,9 +469,8 @@ def _pyav_extract_segment(video_path, indices, thumb_w, thumb_h,
             for frame in container.decode(stream):
                 # GPU → CPU transfer: reformat hwaccel frames before
                 # to_image() to avoid repeated GPU⇄CPU copies.
-                pix_fmt = getattr(
-                    getattr(frame, 'format', None), 'name', '',
-                )
+                fmt = getattr(frame, 'format', None)
+                pix_fmt = getattr(fmt, 'name', '') if fmt else ''
                 if pix_fmt in _HW_PIX_FMTS:
                     frame = frame.reformat(width=raw_w, height=raw_h,
                                            format='rgb24')
