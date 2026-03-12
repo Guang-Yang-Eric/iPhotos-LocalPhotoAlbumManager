@@ -30,9 +30,16 @@ _spec.loader.exec_module(video_demo)
 
 # Import the new modular package
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "demo"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "demo", "video"))
 from video import probe as probe_mod        # noqa: E402
 from video import hwaccel as hwaccel_mod    # noqa: E402
 from video import extraction as extract_mod # noqa: E402
+
+# The modules inside demo/video/ use bare imports (e.g. ``from hwaccel import ...``).
+# When the test file does ``from video import hwaccel``, Python may create a
+# *separate* module object for the bare ``hwaccel`` vs. ``video.hwaccel``.
+# Import the bare module too so the autouse fixture can reset both caches.
+import hwaccel as _hwaccel_bare  # noqa: E402
 
 # Re-export function references used throughout the test file
 _extract_single_frame = extract_mod._extract_single_frame
@@ -60,10 +67,24 @@ _run_contact_sheet = extract_mod._run_contact_sheet
 
 @pytest.fixture(autouse=True)
 def _reset_hwaccel_cache():
-    """Reset the global hwaccel cache before each test."""
+    """Reset the global hwaccel cache before each test.
+
+    Both the package-qualified module (``video.hwaccel``) and the bare module
+    (``hwaccel``) may hold independent caches — reset them both.
+    """
     hwaccel_mod._hwaccel_cache = None
+    _hwaccel_bare._hwaccel_cache = None
     yield
     hwaccel_mod._hwaccel_cache = None
+    _hwaccel_bare._hwaccel_cache = None
+
+
+def _seed_hwaccel_cache(cache_dict):
+    """Set the hwaccel cache on *both* module copies so tests
+    that call extraction helpers (which use the bare ``hwaccel`` import)
+    see the same pre-seeded value."""
+    hwaccel_mod._hwaccel_cache = cache_dict
+    _hwaccel_bare._hwaccel_cache = cache_dict
 
 
 class TestDetectHwaccel:
@@ -645,18 +666,18 @@ class TestBuildSinglePassCmd:
     """Tests for _build_single_pass_cmd()."""
 
     def test_gpu_keyframe_command(self) -> None:
-        """GPU + keyframe-only uses detected hwaccel (not -hwaccel auto).
+        """GPU + keyframe-only uses full GPU pipeline with -hwaccel_output_format.
 
-        -hwaccel is present but NOT -hwaccel_output_format — frames are
-        auto-transferred to CPU so that CPU filters (select, fps) work.
+        Filter chain: GPU scale → hwdownload → format=bgra → fps (CPU).
+        No redundant select filter (-skip_frame nokey handles it).
         """
         # Pre-seed the cache with a known hwaccel
-        hwaccel_mod._hwaccel_cache = {
+        _seed_hwaccel_cache({
             'hwaccel': 'cuda',
             'scale_filter': 'scale_cuda',
             'download_filter': 'hwdownload',
             'pix_fmt': 'bgra',
-        }
+        })
         cmd = _build_single_pass_cmd(
             "video.mp4", 80, 42, 0.5,
             hwaccel=True, keyframe_only=True,
@@ -665,8 +686,10 @@ class TestBuildSinglePassCmd:
         # Verify the exact hwaccel argument is 'cuda', not 'auto'
         hwaccel_idx = cmd.index('-hwaccel')
         assert cmd[hwaccel_idx + 1] == 'cuda'
-        # Must NOT have -hwaccel_output_format (would keep frames in GPU)
-        assert '-hwaccel_output_format' not in cmd
+        # Full GPU pipeline: -hwaccel_output_format keeps frames in GPU
+        assert '-hwaccel_output_format' in cmd
+        hw_out_idx = cmd.index('-hwaccel_output_format')
+        assert cmd[hw_out_idx + 1] == 'cuda'
         assert '-skip_frame' in cmd
         assert 'nokey' in cmd
         assert '-an' in cmd
@@ -682,15 +705,17 @@ class TestBuildSinglePassCmd:
         vf = cmd[vf_idx + 1]
         assert 'fps=' in vf
         assert 'format=bgra' in vf
-        assert "select=" in vf
-        assert "pict_type" in vf
-        # GPU path uses CPU scale (no GPU scale/hwdownload needed when
-        # -hwaccel_output_format is absent — frames already in CPU).
-        assert 'scale=80:42' in vf
-        assert 'hwdownload' not in vf
+        # No redundant select filter (-skip_frame nokey handles it)
+        assert "select=" not in vf
+        # GPU scale + hwdownload (frames are in GPU memory)
+        assert 'scale_cuda=80:42' in vf
+        assert 'hwdownload' in vf
+        # GPU filters come before CPU filters
+        assert vf.index('scale_cuda') < vf.index('hwdownload')
+        assert vf.index('hwdownload') < vf.index('fps')
 
     def test_cpu_keyframe_command(self) -> None:
-        """CPU + keyframe-only: no -hwaccel, has -skip_frame."""
+        """CPU + keyframe-only: no -hwaccel, has -skip_frame, no select."""
         cmd = _build_single_pass_cmd(
             "video.mp4", 80, 42, 0.5,
             hwaccel=False, keyframe_only=True,
@@ -699,6 +724,9 @@ class TestBuildSinglePassCmd:
         assert '-skip_frame' in cmd
         assert 'nokey' in cmd
         assert '-nostdin' in cmd
+        vf_idx = cmd.index('-vf')
+        vf = cmd[vf_idx + 1]
+        assert "select=" not in vf
 
     def test_cpu_full_decode_command(self) -> None:
         """CPU without keyframe skip: no -hwaccel, no -skip_frame, no select."""
@@ -726,12 +754,12 @@ class TestBuildSinglePassCmd:
 
     def test_no_hwaccel_detected_falls_back_to_cpu_scale(self) -> None:
         """When no hwaccel is detected, hwaccel=True still uses CPU scale."""
-        hwaccel_mod._hwaccel_cache = {
+        _seed_hwaccel_cache({
             'hwaccel': None,
             'scale_filter': 'scale',
             'download_filter': '',
             'pix_fmt': 'bgra',
-        }
+        })
         cmd = _build_single_pass_cmd(
             "video.mp4", 80, 42, 0.5,
             hwaccel=True, keyframe_only=True,
@@ -740,6 +768,28 @@ class TestBuildSinglePassCmd:
         vf_idx = cmd.index('-vf')
         vf = cmd[vf_idx + 1]
         assert 'scale=80:42' in vf
+
+    def test_hwaccel_without_gpu_scale_uses_cpu_scale(self) -> None:
+        """When hwaccel exists but no GPU scale filter, use -hwaccel without
+        -hwaccel_output_format and CPU scale."""
+        _seed_hwaccel_cache({
+            'hwaccel': 'cuda',
+            'scale_filter': 'scale',
+            'download_filter': 'hwdownload',
+            'pix_fmt': 'bgra',
+        })
+        cmd = _build_single_pass_cmd(
+            "video.mp4", 80, 42, 0.5,
+            hwaccel=True, keyframe_only=True,
+        )
+        assert '-hwaccel' in cmd
+        hwaccel_idx = cmd.index('-hwaccel')
+        assert cmd[hwaccel_idx + 1] == 'cuda'
+        assert '-hwaccel_output_format' not in cmd
+        vf_idx = cmd.index('-vf')
+        vf = cmd[vf_idx + 1]
+        assert 'scale=80:42' in vf
+        assert 'hwdownload' not in vf
 
 
 # ---------------------------------------------------------------------------
@@ -1430,10 +1480,10 @@ class TestBuildContactSheetCmd:
 
     def test_basic_cpu_keyframe(self) -> None:
         """CPU + keyframe produces tile filter and -frames:v 1."""
-        hwaccel_mod._hwaccel_cache = {
+        _seed_hwaccel_cache({
             'hwaccel': None, 'scale_filter': 'scale',
             'download_filter': '', 'pix_fmt': 'bgra',
-        }
+        })
         cmd, strip_w, strip_h = _build_contact_sheet_cmd(
             "video.mp4", 80, 42, 10, 30.0,
             use_hwaccel=False, keyframe_only=True,
@@ -1449,20 +1499,21 @@ class TestBuildContactSheetCmd:
         assert 'tile=10x1' in vf
         assert 'scale=80:42' in vf
         assert 'format=bgra' in vf
-        assert "select=" in vf
+        # No redundant select filter (-skip_frame nokey handles it)
+        assert "select=" not in vf
         assert 'fps=' in vf
         assert 'padding=0' in vf
 
     def test_gpu_keyframe_uses_detected_hwaccel(self) -> None:
-        """GPU path uses -hwaccel but NOT -hwaccel_output_format.
+        """GPU path uses full GPU pipeline with -hwaccel_output_format.
 
-        Omitting -hwaccel_output_format ensures frames are auto-transferred
-        to CPU so CPU-only filters (select, fps, tile) work correctly.
+        Filter chain: GPU scale → hwdownload → format=bgra → fps → tile.
+        No redundant select filter (-skip_frame nokey handles it).
         """
-        hwaccel_mod._hwaccel_cache = {
+        _seed_hwaccel_cache({
             'hwaccel': 'cuda', 'scale_filter': 'scale_cuda',
             'download_filter': 'hwdownload', 'pix_fmt': 'bgra',
-        }
+        })
         cmd, strip_w, strip_h = _build_contact_sheet_cmd(
             "video.mp4", 80, 42, 5, 10.0,
             use_hwaccel=True, keyframe_only=True,
@@ -1470,21 +1521,29 @@ class TestBuildContactSheetCmd:
         assert '-hwaccel' in cmd
         hwaccel_idx = cmd.index('-hwaccel')
         assert cmd[hwaccel_idx + 1] == 'cuda'
-        # Must NOT have -hwaccel_output_format (would keep frames in GPU)
-        assert '-hwaccel_output_format' not in cmd
+        # Full GPU pipeline: -hwaccel_output_format keeps frames in GPU
+        assert '-hwaccel_output_format' in cmd
+        hw_out_idx = cmd.index('-hwaccel_output_format')
+        assert cmd[hw_out_idx + 1] == 'cuda'
         vf_idx = cmd.index('-vf')
         vf = cmd[vf_idx + 1]
-        # Uses CPU scale (no GPU scale/hwdownload — frames already in CPU)
-        assert 'scale=80:42' in vf
-        assert 'hwdownload' not in vf
+        # GPU scale + hwdownload (frames are in GPU memory)
+        assert 'scale_cuda=80:42' in vf
+        assert 'hwdownload' in vf
         assert 'tile=5x1' in vf
+        # No redundant select filter
+        assert "select=" not in vf
+        # GPU filters come before CPU filters
+        assert vf.index('scale_cuda') < vf.index('hwdownload')
+        assert vf.index('hwdownload') < vf.index('fps')
+        assert vf.index('fps') < vf.index('tile')
 
     def test_cpu_full_decode(self) -> None:
         """Full decode: no -skip_frame, no select filter."""
-        hwaccel_mod._hwaccel_cache = {
+        _seed_hwaccel_cache({
             'hwaccel': None, 'scale_filter': 'scale',
             'download_filter': '', 'pix_fmt': 'bgra',
-        }
+        })
         cmd, _, _ = _build_contact_sheet_cmd(
             "video.mp4", 80, 42, 10, 30.0,
             use_hwaccel=False, keyframe_only=False,
@@ -1497,10 +1556,10 @@ class TestBuildContactSheetCmd:
 
     def test_strip_dimensions(self) -> None:
         """Strip dimensions are count * thumb_w by thumb_h."""
-        hwaccel_mod._hwaccel_cache = {
+        _seed_hwaccel_cache({
             'hwaccel': None, 'scale_filter': 'scale',
             'download_filter': '', 'pix_fmt': 'bgra',
-        }
+        })
         _, strip_w, strip_h = _build_contact_sheet_cmd(
             "video.mp4", 120, 60, 20, 60.0,
             use_hwaccel=False, keyframe_only=True,
@@ -1508,16 +1567,37 @@ class TestBuildContactSheetCmd:
         assert strip_w == 120 * 20
         assert strip_h == 60
 
+    def test_hwaccel_without_gpu_scale_uses_cpu_scale(self) -> None:
+        """When hwaccel exists but no GPU scale filter, use -hwaccel without
+        -hwaccel_output_format and CPU scale."""
+        _seed_hwaccel_cache({
+            'hwaccel': 'cuda', 'scale_filter': 'scale',
+            'download_filter': 'hwdownload', 'pix_fmt': 'bgra',
+        })
+        cmd, _, _ = _build_contact_sheet_cmd(
+            "video.mp4", 80, 42, 5, 10.0,
+            use_hwaccel=True, keyframe_only=True,
+        )
+        assert '-hwaccel' in cmd
+        hwaccel_idx = cmd.index('-hwaccel')
+        assert cmd[hwaccel_idx + 1] == 'cuda'
+        assert '-hwaccel_output_format' not in cmd
+        vf_idx = cmd.index('-vf')
+        vf = cmd[vf_idx + 1]
+        assert 'scale=80:42' in vf
+        assert 'hwdownload' not in vf
+        assert 'tile=5x1' in vf
+
 
 class TestRunContactSheet:
     """Tests for _run_contact_sheet()."""
 
     def test_returns_strip_on_success(self) -> None:
         """Successful run returns (strip_w, strip_h, bytes)."""
-        hwaccel_mod._hwaccel_cache = {
+        _seed_hwaccel_cache({
             'hwaccel': None, 'scale_filter': 'scale',
             'download_filter': '', 'pix_fmt': 'bgra',
-        }
+        })
         # 3 tiles of 4x2 = strip 12x2 = 96 bytes (12*2*4)
         strip_w, strip_h = 3 * 4, 2
         expected_size = strip_w * strip_h * 4
@@ -1542,10 +1622,10 @@ class TestRunContactSheet:
 
     def test_returns_none_on_short_read(self) -> None:
         """Returns None when ffmpeg outputs fewer bytes than expected."""
-        hwaccel_mod._hwaccel_cache = {
+        _seed_hwaccel_cache({
             'hwaccel': None, 'scale_filter': 'scale',
             'download_filter': '', 'pix_fmt': 'bgra',
-        }
+        })
         fake_proc = MagicMock()
         fake_proc.stdout.read.return_value = b'\x00' * 10  # too short
         fake_proc.stderr.read.return_value = b''
@@ -1561,10 +1641,10 @@ class TestRunContactSheet:
 
     def test_returns_none_on_exception(self) -> None:
         """Returns None when subprocess raises."""
-        hwaccel_mod._hwaccel_cache = {
+        _seed_hwaccel_cache({
             'hwaccel': None, 'scale_filter': 'scale',
             'download_filter': '', 'pix_fmt': 'bgra',
-        }
+        })
         with patch("video.extraction.subprocess.Popen", side_effect=OSError("fail")):
             result = _run_contact_sheet(
                 "video.mp4", 80, 42, 10, 30.0,

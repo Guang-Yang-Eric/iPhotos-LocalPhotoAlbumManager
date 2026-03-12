@@ -94,29 +94,45 @@ def _build_contact_sheet_cmd(video_path, thumb_w, thumb_h, count,
            '-probesize', '32768', '-analyzeduration', '0',
            '-fflags', '+nobuffer']
 
+    # Determine whether we can use the full GPU pipeline:
+    #   GPU scale → hwdownload → format=bgra → (CPU fps, tile)
+    # This requires -hwaccel_output_format to keep frames in GPU memory
+    # for GPU scaling, then hwdownload transfers them to CPU *after* scale.
+    # CPU-only filters (fps, tile) come after the download.
+    gpu_scale = False
     if hwaccel:
-        # Use -hwaccel WITHOUT -hwaccel_output_format so that FFmpeg
-        # hardware-decodes but auto-transfers frames to CPU memory.
-        # This is required because CPU-only filters (select, fps, tile)
-        # cannot operate on GPU-resident frames.  Omitting
-        # -hwaccel_output_format avoids the "Invalid output format bgra
-        # for hwframe download" error while still benefiting from HW decode.
-        cmd.extend(['-hwaccel', hwaccel])
+        scale_filter = hw['scale_filter']
+        download = hw['download_filter']
+        if scale_filter.startswith('scale_') and download:
+            hw_out_fmt = _build_hwaccel_output_format(hwaccel)
+            cmd.extend(['-hwaccel', hwaccel,
+                        '-hwaccel_output_format', hw_out_fmt])
+            gpu_scale = True
+        else:
+            # HW decode only — frames auto-transfer to CPU (no GPU scale)
+            cmd.extend(['-hwaccel', hwaccel])
 
     if keyframe_only:
         cmd.extend(['-skip_frame', 'nokey'])
 
     cmd.extend(['-i', video_path])
 
-    # Build the filter graph — all filters run on CPU frames.
+    # Build the filter graph.
+    # Note: -skip_frame nokey already limits the decoder to keyframes,
+    # so the redundant select='eq(pict_type,I)' filter is not needed.
     parts = []
 
-    if keyframe_only:
-        parts.append("select='eq(pict_type\\,I)'")
-
-    parts.append(f'fps={fps_rate:.6f}')
-    parts.append(f'scale={thumb_w}:{thumb_h}')
-    parts.append('format=bgra')
+    if gpu_scale:
+        # GPU scale first (while frames are still in GPU memory),
+        # then download to CPU, then CPU-only filters.
+        parts.append(f'{scale_filter}={thumb_w}:{thumb_h}')
+        parts.append(download)
+        parts.append('format=bgra')
+        parts.append(f'fps={fps_rate:.6f}')
+    else:
+        parts.append(f'fps={fps_rate:.6f}')
+        parts.append(f'scale={thumb_w}:{thumb_h}')
+        parts.append('format=bgra')
 
     # tile=Nx1 assembles N frames into a single horizontal row.
     # padding=0 removes any gap between cells.
@@ -206,26 +222,38 @@ def _build_single_pass_cmd(video_path, thumb_w, thumb_h, fps_rate,
            '-probesize', '32768', '-analyzeduration', '0',
            '-fflags', '+nobuffer']
 
+    # Determine whether we can use the full GPU pipeline.
+    gpu_scale = False
     if hwaccel_name:
-        # Use -hwaccel WITHOUT -hwaccel_output_format so that FFmpeg
-        # hardware-decodes but auto-transfers frames to CPU memory.
-        # This is required because CPU-only filters (select, fps) cannot
-        # operate on GPU-resident frames.
-        cmd.extend(['-hwaccel', hwaccel_name])
+        scale_filter = hw['scale_filter']
+        download = hw['download_filter']
+        if scale_filter.startswith('scale_') and download:
+            hw_out_fmt = _build_hwaccel_output_format(hwaccel_name)
+            cmd.extend(['-hwaccel', hwaccel_name,
+                        '-hwaccel_output_format', hw_out_fmt])
+            gpu_scale = True
+        else:
+            cmd.extend(['-hwaccel', hwaccel_name])
 
     if keyframe_only:
         cmd.extend(['-skip_frame', 'nokey'])
 
     cmd.extend(['-i', video_path])
 
-    # Build filter chain — all filters run on CPU frames.
+    # Build filter chain.
+    # -skip_frame nokey already limits the decoder to keyframes,
+    # so select='eq(pict_type,I)' is not needed.
     parts = []
-    if keyframe_only:
-        parts.append("select='eq(pict_type\\,I)'")
 
-    parts.append(f'fps={fps_rate:.6f}')
-    parts.append(f'scale={thumb_w}:{thumb_h}')
-    parts.append('format=bgra')
+    if gpu_scale:
+        parts.append(f'{scale_filter}={thumb_w}:{thumb_h}')
+        parts.append(download)
+        parts.append('format=bgra')
+        parts.append(f'fps={fps_rate:.6f}')
+    else:
+        parts.append(f'fps={fps_rate:.6f}')
+        parts.append(f'scale={thumb_w}:{thumb_h}')
+        parts.append('format=bgra')
 
     vf = ','.join(parts)
     cmd.extend(['-vf', vf, '-an', '-f', 'rawvideo', '-vsync', 'vfr',
