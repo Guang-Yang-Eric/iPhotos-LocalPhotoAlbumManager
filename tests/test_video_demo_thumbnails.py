@@ -658,9 +658,9 @@ class TestBuildSinglePassCmd:
             hwaccel=True, keyframe_only=True,
         )
         assert '-hwaccel' in cmd
-        assert 'cuda' in cmd
-        # Should NOT use 'auto' — uses the cached specific hwaccel
-        assert 'auto' not in cmd
+        # Verify the exact hwaccel argument is 'cuda', not 'auto'
+        hwaccel_idx = cmd.index('-hwaccel')
+        assert cmd[hwaccel_idx + 1] == 'cuda'
         assert '-skip_frame' in cmd
         assert 'nokey' in cmd
         assert '-an' in cmd
@@ -1457,8 +1457,8 @@ class TestBuildContactSheetCmd:
             use_hwaccel=True, keyframe_only=True,
         )
         assert '-hwaccel' in cmd
-        assert 'cuda' in cmd
-        assert 'auto' not in cmd
+        hwaccel_idx = cmd.index('-hwaccel')
+        assert cmd[hwaccel_idx + 1] == 'cuda'
         vf_idx = cmd.index('-vf')
         vf = cmd[vf_idx + 1]
         assert 'scale_cuda=80:42' in vf
