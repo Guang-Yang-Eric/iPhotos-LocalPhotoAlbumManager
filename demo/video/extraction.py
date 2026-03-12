@@ -125,8 +125,11 @@ def _build_contact_sheet_cmd(video_path, thumb_w, thumb_h, count,
     if gpu_scale:
         # GPU scale first (while frames are still in GPU memory),
         # then download to CPU, then CPU-only filters.
+        # format=nv12 pins the hwdownload output format to prevent
+        # downstream negotiation requesting unsupported formats.
         parts.append(f'{scale_filter}={thumb_w}:{thumb_h}')
         parts.append(download)
+        parts.append('format=nv12')
         parts.append('format=bgra')
         parts.append(f'fps={fps_rate:.6f}')
     else:
@@ -246,8 +249,10 @@ def _build_single_pass_cmd(video_path, thumb_w, thumb_h, fps_rate,
     parts = []
 
     if gpu_scale:
+        # format=nv12 pins hwdownload output to prevent negotiation errors
         parts.append(f'{scale_filter}={thumb_w}:{thumb_h}')
         parts.append(download)
+        parts.append('format=nv12')
         parts.append('format=bgra')
         parts.append(f'fps={fps_rate:.6f}')
     else:
@@ -584,29 +589,50 @@ def _pyav_extract_segment(video_path, indices, thumb_w, thumb_h,
 
 def _extract_thumbnails_pyav(video_path, num_frames, thumb_w, thumb_h,
                              callback=None, rotation=0, vflip=False):
-    """Extract thumbnails using keyframe-aware multi-threaded PyAV.
+    """Extract thumbnails using optimised keyframe-aware PyAV.
+
+    Pipeline:
+    1. Single container open for duration probe **and** keyframe scan —
+       saves one container open vs. the previous two-open approach.
+    2. Snap target times to nearest keyframes, then **deduplicate** so
+       each keyframe is decoded at most once.
+    3. Single container with sequential forward seeks and
+       ``thread_count=0`` (all CPU cores for the decoder).  Forward-only
+       seeks are nearly free since the demuxer doesn't need to re-scan.
 
     Returns list of (width, height, bytes) tuples in RGB888 format.
     """
     try:
+        # --- Phase 1: probe duration + scan keyframes in ONE open ---
         container = _av_module.open(video_path)
         stream = container.streams.video[0]
+        time_base = stream.time_base
 
         duration = 0.0
-        if stream.duration and stream.time_base:
-            duration = float(stream.duration * stream.time_base)
+        if stream.duration and time_base:
+            duration = float(stream.duration * time_base)
         if duration <= 0 and container.duration:
             duration = container.duration / _av_module.time_base
+
+        keyframes = []
+        if duration > 0:
+            for packet in container.demux(stream):
+                if packet.pts is None:
+                    continue
+                if packet.is_keyframe:
+                    keyframes.append(float(packet.pts * time_base))
         container.close()
 
         if duration <= 0:
             return []
 
+        if keyframes:
+            keyframes = sorted(set(keyframes))
+
+        # --- Phase 2: compute targets, snap, deduplicate ---
         step = duration / num_frames
         target_times = [i * step for i in range(num_frames)]
 
-        # --- Keyframe-aware sampling ---
-        keyframes = _get_keyframe_timestamps_pyav(video_path)
         if keyframes:
             all_indices = _snap_to_keyframes(target_times, keyframes)
             print(f"[pyav] Snapped {num_frames} targets to "
@@ -614,56 +640,69 @@ def _extract_thumbnails_pyav(video_path, num_frames, thumb_w, thumb_h,
         else:
             all_indices = list(enumerate(target_times))
 
-        # Determine number of worker threads
-        num_workers = min(PYAV_MAX_WORKERS,
-                          max(1, (os.cpu_count() or 4) // 2))
-        num_workers = min(num_workers, num_frames)
+        # Deduplicate: group target indices by their snapped keyframe time
+        # so each unique keyframe is decoded only once.
+        kf_to_indices: dict[float, list[int]] = {}
+        for global_idx, kf_time in all_indices:
+            kf_key = round(kf_time, 6)
+            kf_to_indices.setdefault(kf_key, []).append(global_idx)
 
-        if num_workers <= 1:
-            segment_results = _pyav_extract_segment(
-                video_path, all_indices, thumb_w, thumb_h,
-                rotation=rotation, vflip=vflip,
-            )
-            all_results = segment_results
+        unique_times = sorted(kf_to_indices.keys())
+        unique_count = len(unique_times)
+        print(f"[pyav] {unique_count} unique keyframes to decode")
+
+        # --- Phase 3: single-container sequential forward seeks ---
+        if rotation in (90, 270):
+            raw_w, raw_h = thumb_h, thumb_w
         else:
-            sorted_all = sorted(all_indices, key=lambda x: x[1])
-            per_worker = max(1, len(sorted_all) // num_workers)
-            segments = []
-            for w in range(num_workers):
-                start = w * per_worker
-                if w == num_workers - 1:
-                    seg = sorted_all[start:]
-                else:
-                    seg = sorted_all[start:start + per_worker]
-                if seg:
-                    segments.append(seg)
+            raw_w, raw_h = thumb_w, thumb_h
 
-            with concurrent.futures.ThreadPoolExecutor(
-                max_workers=len(segments),
-            ) as pool:
-                futures = [
-                    pool.submit(
-                        _pyav_extract_segment,
-                        video_path, seg, thumb_w, thumb_h,
-                        rotation, vflip,
-                    )
-                    for seg in segments
-                ]
-                all_results = []
-                for f in concurrent.futures.as_completed(futures):
-                    try:
-                        all_results.extend(f.result())
-                    except Exception as e:
-                        print(f"[pyav-mt] Segment error: {e}")
+        container = _av_module.open(video_path)
+        stream = container.streams.video[0]
+        stream.thread_type = 'AUTO'
+        # Use all CPU cores for the single decoder — faster than
+        # splitting across multiple containers with limited threads.
+        stream.codec_context.thread_count = 0
+        time_base = stream.time_base
 
-        # Sort by global index to restore frame order
-        all_results.sort(key=lambda x: x[0])
+        frame_cache: dict[float, tuple[int, int, bytes]] = {}
 
+        for kf_time in unique_times:
+            target_pts = int(kf_time / float(time_base))
+            container.seek(max(0, target_pts), stream=stream)
+
+            for frame in container.decode(stream):
+                img = frame.to_image(
+                    width=raw_w, height=raw_h,
+                    interpolation='FAST_BILINEAR',
+                )
+
+                # Apply orientation transforms (PyAV does NOT auto-rotate)
+                if rotation == 90:
+                    img = img.transpose(_PILImage.Transpose.ROTATE_270)
+                elif rotation == 180:
+                    img = img.transpose(_PILImage.Transpose.ROTATE_180)
+                elif rotation == 270:
+                    img = img.transpose(_PILImage.Transpose.ROTATE_90)
+                if vflip:
+                    img = img.transpose(_PILImage.Transpose.FLIP_TOP_BOTTOM)
+
+                rgb_data = img.tobytes("raw", "RGB")
+                kf_key = round(kf_time, 6)
+                frame_cache[kf_key] = (thumb_w, thumb_h, rgb_data)
+                break  # Only need first frame after seek
+
+        container.close()
+
+        # --- Phase 4: emit results in target order ---
         thumbnails = []
-        for global_idx, w, h, rgb_data in all_results:
-            thumbnails.append((w, h, rgb_data))
-            if callback:
-                callback(global_idx, rgb_data, w, h)
+        for global_idx, kf_time in sorted(all_indices, key=lambda x: x[0]):
+            kf_key = round(kf_time, 6)
+            if kf_key in frame_cache:
+                w, h, rgb_data = frame_cache[kf_key]
+                thumbnails.append((w, h, rgb_data))
+                if callback:
+                    callback(global_idx, rgb_data, w, h)
 
         return thumbnails
 

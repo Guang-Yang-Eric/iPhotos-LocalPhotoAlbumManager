@@ -668,7 +668,7 @@ class TestBuildSinglePassCmd:
     def test_gpu_keyframe_command(self) -> None:
         """GPU + keyframe-only uses full GPU pipeline with -hwaccel_output_format.
 
-        Filter chain: GPU scale → hwdownload → format=bgra → fps (CPU).
+        Filter chain: GPU scale → hwdownload → format=nv12 → format=bgra → fps (CPU).
         No redundant select filter (-skip_frame nokey handles it).
         """
         # Pre-seed the cache with a known hwaccel
@@ -705,14 +705,17 @@ class TestBuildSinglePassCmd:
         vf = cmd[vf_idx + 1]
         assert 'fps=' in vf
         assert 'format=bgra' in vf
+        assert 'format=nv12' in vf
         # No redundant select filter (-skip_frame nokey handles it)
         assert "select=" not in vf
         # GPU scale + hwdownload (frames are in GPU memory)
         assert 'scale_cuda=80:42' in vf
         assert 'hwdownload' in vf
-        # GPU filters come before CPU filters
+        # GPU filters come before CPU filters, with format=nv12 pin
         assert vf.index('scale_cuda') < vf.index('hwdownload')
-        assert vf.index('hwdownload') < vf.index('fps')
+        assert vf.index('hwdownload') < vf.index('format=nv12')
+        assert vf.index('format=nv12') < vf.index('format=bgra')
+        assert vf.index('format=bgra') < vf.index('fps')
 
     def test_cpu_keyframe_command(self) -> None:
         """CPU + keyframe-only: no -hwaccel, has -skip_frame, no select."""
@@ -1507,7 +1510,7 @@ class TestBuildContactSheetCmd:
     def test_gpu_keyframe_uses_detected_hwaccel(self) -> None:
         """GPU path uses full GPU pipeline with -hwaccel_output_format.
 
-        Filter chain: GPU scale → hwdownload → format=bgra → fps → tile.
+        Filter chain: GPU scale → hwdownload → format=nv12 → format=bgra → fps → tile.
         No redundant select filter (-skip_frame nokey handles it).
         """
         _seed_hwaccel_cache({
@@ -1530,12 +1533,15 @@ class TestBuildContactSheetCmd:
         # GPU scale + hwdownload (frames are in GPU memory)
         assert 'scale_cuda=80:42' in vf
         assert 'hwdownload' in vf
+        assert 'format=nv12' in vf
         assert 'tile=5x1' in vf
         # No redundant select filter
         assert "select=" not in vf
-        # GPU filters come before CPU filters
+        # GPU filters come before CPU filters, with format=nv12 pin
         assert vf.index('scale_cuda') < vf.index('hwdownload')
-        assert vf.index('hwdownload') < vf.index('fps')
+        assert vf.index('hwdownload') < vf.index('format=nv12')
+        assert vf.index('format=nv12') < vf.index('format=bgra')
+        assert vf.index('format=bgra') < vf.index('fps')
         assert vf.index('fps') < vf.index('tile')
 
     def test_cpu_full_decode(self) -> None:

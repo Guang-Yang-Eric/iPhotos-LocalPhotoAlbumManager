@@ -1,12 +1,12 @@
 """ThumbnailWorker — QThread that generates timeline thumbnails.
 
 Strategy order (optimised for "one-shot complete display"):
-  0. Contact-sheet strip (GPU + keyframe) — single image, zero per-frame cost
-  1. Contact-sheet strip (CPU + keyframe)
-  2. Contact-sheet strip (CPU, full decode)
-  3. Single-pass raw frames (GPU + keyframe)
-  4. Single-pass raw frames (CPU + keyframe)
-  5. PyAV in-process extraction
+  0. PyAV in-process extraction — zero subprocess overhead, keyframe-aware
+  1. Contact-sheet strip (GPU + keyframe) — single image, zero per-frame cost
+  2. Contact-sheet strip (CPU + keyframe)
+  3. Contact-sheet strip (CPU, full decode)
+  4. Single-pass raw frames (GPU + keyframe)
+  5. Single-pass raw frames (CPU + keyframe)
   6. Sliced multi-process extraction
   7. Parallel individual extraction (slowest fallback)
 """
@@ -111,7 +111,15 @@ class ThumbnailWorker(QThread):
                   f"rotation={rotation}, vflip={vflip}, "
                   f"PyAV={'yes' if HAS_PYAV else 'no'}")
 
-            # --- Strategy 0: Contact-sheet with GPU + keyframe ---
+            # --- Strategy 0: PyAV in-process extraction (fastest) ---
+            if HAS_PYAV and not self._abort:
+                if self._try_pyav(thumb_w, target_h, count_needed,
+                                  rotation, vflip):
+                    elapsed = time.perf_counter() - t0
+                    print(f"[thumbnail] Done in {elapsed:.2f}s (PyAV)")
+                    return
+
+            # --- Strategy 1: Contact-sheet with GPU + keyframe ---
             if not self._abort:
                 result = _run_contact_sheet(
                     self.video_path, thumb_w, target_h, count_needed,
@@ -126,7 +134,7 @@ class ThumbnailWorker(QThread):
                           f"(contact-sheet gpu+keyframe)")
                     return
 
-            # --- Strategy 1: Contact-sheet CPU + keyframe ---
+            # --- Strategy 2: Contact-sheet CPU + keyframe ---
             if not self._abort:
                 result = _run_contact_sheet(
                     self.video_path, thumb_w, target_h, count_needed,
@@ -141,7 +149,7 @@ class ThumbnailWorker(QThread):
                           f"(contact-sheet cpu+keyframe)")
                     return
 
-            # --- Strategy 2: Contact-sheet CPU full decode ---
+            # --- Strategy 3: Contact-sheet CPU full decode ---
             if not self._abort:
                 result = _run_contact_sheet(
                     self.video_path, thumb_w, target_h, count_needed,
@@ -159,7 +167,7 @@ class ThumbnailWorker(QThread):
             fps_rate = count_needed / max(duration, 0.01)
             frame_size = thumb_w * target_h * 4
 
-            # --- Strategy 3: Single-pass GPU + keyframe (per-frame) ---
+            # --- Strategy 4: Single-pass GPU + keyframe (per-frame) ---
             if self._try_single_pass(
                 thumb_w, target_h, count_needed, fps_rate, frame_size,
                 hwaccel=True, keyframe_only=True,
@@ -169,7 +177,7 @@ class ThumbnailWorker(QThread):
                       f"(single-pass gpu+keyframe)")
                 return
 
-            # --- Strategy 4: Single-pass CPU + keyframe ---
+            # --- Strategy 5: Single-pass CPU + keyframe ---
             if self._try_single_pass(
                 thumb_w, target_h, count_needed, fps_rate, frame_size,
                 hwaccel=False, keyframe_only=True,
@@ -178,14 +186,6 @@ class ThumbnailWorker(QThread):
                 print(f"[thumbnail] Done in {elapsed:.2f}s "
                       f"(single-pass keyframe)")
                 return
-
-            # --- Strategy 5: PyAV in-process extraction ---
-            if HAS_PYAV and not self._abort:
-                if self._try_pyav(thumb_w, target_h, count_needed,
-                                  rotation, vflip):
-                    elapsed = time.perf_counter() - t0
-                    print(f"[thumbnail] Done in {elapsed:.2f}s (PyAV)")
-                    return
 
             # --- Strategy 6: Sliced multi-process ---
             if self._try_sliced_single_pass(
