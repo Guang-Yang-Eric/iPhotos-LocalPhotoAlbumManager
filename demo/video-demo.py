@@ -1,8 +1,7 @@
 import sys
 import os
 import subprocess
-import tempfile
-import shutil
+
 import json
 import concurrent.futures
 import time
@@ -871,61 +870,28 @@ def _run_pipe_cmd(cmd, expected_w, expected_h):
 
 def _extract_single_frame(args):
     """
-    Extract exactly one frame at a specific timestamp.
+    Extract exactly one frame at a specific timestamp via pipe.
 
-    First tries the fast pipe-based path (GPU-accel → SW pipe → file fallback).
-    The pipe path avoids temp files and JPEG encode/decode overhead entirely.
+    Uses the pipe-based path (GPU-accel → auto GPU → SW) which avoids
+    temp files and JPEG encode/decode overhead entirely.
+
+    Args format: (video_path, timestamp, thumb_h, thumb_w)
 
     Returns either:
-      - ('pipe', width, height, bytes)  for pipe-based extraction, or
-      - ('file', path)                  for file-based fallback, or
-      - None                            on total failure.
+      - ('pipe', width, height, bytes)  on success, or
+      - None                            on failure.
     """
     video_path = args[0]
     timestamp = args[1]
-    target_height = args[2]
-    out_path = args[3]
-
-    # Extended args format: (video_path, timestamp, target_height, out_path, thumb_w)
-    if len(args) == 5:
-        thumb_w = args[4]
-    else:
-        thumb_w = None
+    thumb_h = args[2]
+    thumb_w = args[3] if len(args) >= 4 else None
 
     if thumb_w is not None and thumb_w > 0:
-        result = _extract_frame_pipe(video_path, timestamp, thumb_w, target_height)
+        result = _extract_frame_pipe(video_path, timestamp, thumb_w, thumb_h)
         if result is not None:
             w, h, buf = result
             return ('pipe', w, h, buf)
 
-    # --- Fallback: file-based extraction (original approach) ---
-    cmd = [
-        'ffmpeg', '-nostdin',
-        '-probesize', '32768', '-analyzeduration', '0',
-        '-fflags', '+nobuffer',
-        '-ss', f'{timestamp:.4f}',
-        '-i', video_path,
-        '-vf', f'scale=-1:{target_height}',
-        '-frames:v', '1',
-        '-q:v', '3',
-        '-y',
-        out_path,
-    ]
-
-    try:
-        startupinfo, popen_kwargs = _build_popen_priority_kwargs()
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            startupinfo=startupinfo,
-            **popen_kwargs,
-        )
-        proc.wait()
-        if os.path.exists(out_path) and os.path.getsize(out_path) > 0:
-            return ('file', out_path)
-    except Exception as e:
-        print(f"FFmpeg frame extraction error: {e}")
     return None
 
 
@@ -993,13 +959,12 @@ class ThumbnailWorker(QThread):
     thumbnails_ready = Signal(list)
     error_occurred = Signal(str)
 
-    def __init__(self, video_path, target_height, visible_width, temp_dir,
+    def __init__(self, video_path, target_height, visible_width,
                  num_workers=None, dpr=1.0, parent=None):
         super().__init__(parent)
         self.video_path = video_path
         self.target_height = target_height
         self.visible_width = visible_width
-        self.temp_dir = temp_dir
         self.dpr = dpr
         self._abort = False
         self._proc = None
@@ -1217,19 +1182,16 @@ class ThumbnailWorker(QThread):
 
     def _fallback_parallel(self, thumb_w, target_h, count_needed,
                            duration):
-        """Fall back to N parallel individual frame extractions."""
-        print("[thumbnail] Falling back to parallel extraction")
+        """Fall back to N parallel individual pipe-based frame extractions."""
+        print("[thumbnail] Falling back to parallel pipe extraction")
 
         timestamps = [
             i * duration / count_needed for i in range(count_needed)
         ]
         tasks = []
         for i, ts in enumerate(timestamps):
-            out_path = os.path.join(
-                self.temp_dir, f"thumb_{i:04d}.jpg",
-            )
             tasks.append(
-                (self.video_path, ts, target_h, out_path, thumb_w),
+                (self.video_path, ts, target_h, thumb_w),
             )
 
         with concurrent.futures.ThreadPoolExecutor(
@@ -1522,7 +1484,6 @@ class VideoEditor(QMainWindow):
         self.resize(1000, 700)
         self.setStyleSheet(STYLESHEET)
 
-        self.temp_dir = None
         self._thumb_worker = None
 
         # --- 主布局 ---
@@ -1625,10 +1586,6 @@ class VideoEditor(QMainWindow):
     def generate_thumbnails(self, video_path):
         self.thumb_strip.clear()
 
-        if self.temp_dir and os.path.exists(self.temp_dir):
-            shutil.rmtree(self.temp_dir)
-        self.temp_dir = tempfile.mkdtemp()
-
         # Generate at physical pixel resolution for crisp HiDPI display
         dpr = self.devicePixelRatioF()
         target_height = int(THUMB_LOGICAL_HEIGHT * dpr)
@@ -1639,7 +1596,7 @@ class VideoEditor(QMainWindow):
 
         # Launch worker — uses single-pass approach (NLE-style)
         self._thumb_worker = ThumbnailWorker(
-            video_path, target_height, visible_width, self.temp_dir,
+            video_path, target_height, visible_width,
             dpr=dpr,
         )
         # Progressive display (single-pass path — each thumb as it arrives)
@@ -1664,39 +1621,32 @@ class VideoEditor(QMainWindow):
                 buf, w, h, w * 3, QImage.Format.Format_RGB888,
             ).copy()
             pix = QPixmap.fromImage(img)
-        elif result[0] == 'pipe':
+        else:
             # ffmpeg subprocess path: BGRA format
             _, w, h, buf = result
             img = QImage(
                 buf, w, h, w * 4, QImage.Format.Format_ARGB32,
             ).copy()
             pix = QPixmap.fromImage(img)
-        else:
-            pix = QPixmap(result[1])
         if not pix.isNull():
             self.thumb_strip.add_thumbnail(pix)
 
     def _on_thumbnails_ready(self, results):
         """Slot: called on the main/UI thread when all thumbnails are done.
 
-        Each result is either:
-          ('pipe', width, height, bytes) — raw BGRA pixels from pipe
-          ('file', path)                — JPEG file on disk
+        Each result is ('pipe', width, height, bytes) — raw BGRA pixels
+        from pipe-based extraction.
         """
         if not results:
             self._on_thumbnail_error("No thumbnails generated")
             return
         for r in results:
-            if r[0] == 'pipe':
-                _, w, h, buf = r
-                # Note: ffmpeg outputs BGRA byte order. On little-endian systems
-                # (Windows/Linux x86), QImage.Format_ARGB32 stores pixels as
-                # B-G-R-A in memory, which matches ffmpeg's BGRA output exactly.
-                img = QImage(buf, w, h, w * 4, QImage.Format.Format_ARGB32).copy()
-                pix = QPixmap.fromImage(img)
-            else:
-                # File-based fallback
-                pix = QPixmap(r[1])
+            _, w, h, buf = r
+            # Note: ffmpeg outputs BGRA byte order. On little-endian systems
+            # (Windows/Linux x86), QImage.Format_ARGB32 stores pixels as
+            # B-G-R-A in memory, which matches ffmpeg's BGRA output exactly.
+            img = QImage(buf, w, h, w * 4, QImage.Format.Format_ARGB32).copy()
+            pix = QPixmap.fromImage(img)
             if not pix.isNull():
                 self.thumb_strip.add_thumbnail(pix)
 
@@ -1716,8 +1666,6 @@ class VideoEditor(QMainWindow):
         if self._thumb_worker and self._thumb_worker.isRunning():
             self._thumb_worker.abort()
             self._thumb_worker.wait(3000)
-        if self.temp_dir and os.path.exists(self.temp_dir):
-            shutil.rmtree(self.temp_dir)
         event.accept()
 
 

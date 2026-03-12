@@ -428,7 +428,7 @@ class TestTryExtractPipeAuto:
 
 
 class TestExtractSingleFrame:
-    """Unit tests for the _extract_single_frame worker function."""
+    """Unit tests for the _extract_single_frame worker function (pipe-only)."""
 
     def test_pipe_path_returns_pipe_tuple(self) -> None:
         """When pipe extraction succeeds, returns ('pipe', w, h, bytes)."""
@@ -438,8 +438,8 @@ class TestExtractSingleFrame:
         with patch.object(video_demo, "_extract_frame_pipe") as mock_pipe:
             mock_pipe.return_value = (w, h, fake_buf)
 
-            # 5-tuple with thumb_w
-            args = ("video.mp4", 5.0, h, "/tmp/out.jpg", w)
+            # 4-tuple: (video_path, timestamp, thumb_h, thumb_w)
+            args = ("video.mp4", 5.0, h, w)
             result = _extract_single_frame(args)
 
         assert result is not None
@@ -448,113 +448,41 @@ class TestExtractSingleFrame:
         assert result[2] == h
         assert result[3] == fake_buf
 
-    def test_file_fallback_on_pipe_failure(self, tmp_path: Path) -> None:
-        """When pipe fails, falls back to file-based extraction."""
-        out_path = str(tmp_path / "thumb_0000.jpg")
-
-        with patch.object(video_demo, "_extract_frame_pipe", return_value=None), \
-             patch.object(subprocess, "Popen") as mock_popen:
-            proc_mock = MagicMock()
-            proc_mock.wait.return_value = 0
-            mock_popen.return_value = proc_mock
-            Path(out_path).write_bytes(b"\xff\xd8\xff")
-
-            args = ("video.mp4", 5.0, 42, out_path, 80)
-            result = _extract_single_frame(args)
-
-        assert result is not None
-        assert result[0] == 'file'
-        assert result[1] == out_path
-
-    def test_file_fallback_without_thumb_w(self, tmp_path: Path) -> None:
-        """When no thumb_w (4-tuple args), goes directly to file fallback."""
-        out_path = str(tmp_path / "thumb_0000.jpg")
-
-        with patch.object(subprocess, "Popen") as mock_popen:
-            proc_mock = MagicMock()
-            proc_mock.wait.return_value = 0
-            mock_popen.return_value = proc_mock
-            Path(out_path).write_bytes(b"\xff\xd8\xff")
-
-            args = ("video.mp4", 5.0, 42, out_path)
-            result = _extract_single_frame(args)
-
-        assert result is not None
-        assert result[0] == 'file'
-
-    def test_returns_none_on_total_failure(self, tmp_path: Path) -> None:
-        """When both pipe and file fail, returns None."""
-        out_path = str(tmp_path / "thumb_0000.jpg")
-
-        with patch.object(video_demo, "_extract_frame_pipe", return_value=None), \
-             patch.object(subprocess, "Popen", side_effect=FileNotFoundError("ffmpeg")):
-            args = ("video.mp4", 0.0, 42, out_path, 80)
+    def test_returns_none_on_pipe_failure(self) -> None:
+        """When pipe extraction fails, returns None (no file fallback)."""
+        with patch.object(video_demo, "_extract_frame_pipe", return_value=None):
+            args = ("video.mp4", 5.0, 42, 80)
             result = _extract_single_frame(args)
 
         assert result is None
 
-    def test_file_fallback_ffmpeg_uses_ss(self, tmp_path: Path) -> None:
-        """File fallback still uses -ss and -frames:v 1 with perf flags."""
-        out_path = str(tmp_path / "thumb_0001.jpg")
+    def test_returns_none_without_thumb_w(self) -> None:
+        """When no thumb_w (3-tuple args), returns None."""
+        args = ("video.mp4", 5.0, 42)
+        result = _extract_single_frame(args)
 
-        with patch.object(video_demo, "_extract_frame_pipe", return_value=None), \
-             patch.object(subprocess, "Popen") as mock_popen:
-            proc_mock = MagicMock()
-            proc_mock.wait.return_value = 0
-            mock_popen.return_value = proc_mock
-            Path(out_path).write_bytes(b"\xff\xd8\xff")
+        assert result is None
 
-            args = ("video.mp4", 10.5, 42, out_path, 80)
-            _extract_single_frame(args)
-            captured_cmd = mock_popen.call_args[0][0]
+    def test_returns_none_on_total_failure(self) -> None:
+        """When pipe raises exception, returns None."""
+        with patch.object(video_demo, "_extract_frame_pipe", return_value=None):
+            args = ("video.mp4", 0.0, 42, 80)
+            result = _extract_single_frame(args)
 
-        assert "-ss" in captured_cmd
-        assert "-frames:v" in captured_cmd
-        assert "-nostdin" in captured_cmd
-        assert "-probesize" in captured_cmd
+        assert result is None
 
-    def test_unix_preexec_fn_sets_nice(self, tmp_path: Path) -> None:
-        """On Unix, file fallback preexec_fn is set to nice the ffmpeg child."""
-        out_path = str(tmp_path / "thumb_0000.jpg")
+    def test_calls_extract_frame_pipe_with_correct_args(self) -> None:
+        """Pipe extraction is called with correct dimensions."""
+        w, h = 160, 90
+        fake_buf = b'\x00' * (w * h * 4)
 
-        with patch.object(video_demo, "_extract_frame_pipe", return_value=None), \
-             patch.object(subprocess, "Popen") as mock_popen:
-            proc_mock = MagicMock()
-            proc_mock.wait.return_value = 0
-            mock_popen.return_value = proc_mock
-            Path(out_path).write_bytes(b"\xff\xd8\xff")
+        with patch.object(video_demo, "_extract_frame_pipe") as mock_pipe:
+            mock_pipe.return_value = (w, h, fake_buf)
 
-            args = ("video.mp4", 0.0, 42, out_path, 80)
+            args = ("video.mp4", 10.5, h, w)
             _extract_single_frame(args)
 
-            call_kwargs = mock_popen.call_args[1]
-            assert "preexec_fn" in call_kwargs
-            with patch("os.nice") as mock_nice:
-                call_kwargs["preexec_fn"]()
-                mock_nice.assert_called_once_with(10)
-
-    def test_windows_low_priority(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """On Windows, BELOW_NORMAL_PRIORITY_CLASS is passed to Popen."""
-        out_path = str(tmp_path / "thumb_0000.jpg")
-        monkeypatch.setattr(os, "name", "nt")
-
-        mock_startupinfo = MagicMock()
-        mock_startupinfo.dwFlags = 0
-        monkeypatch.setattr(subprocess, "STARTUPINFO", lambda: mock_startupinfo, raising=False)
-        monkeypatch.setattr(subprocess, "STARTF_USESHOWWINDOW", 1, raising=False)
-
-        with patch.object(video_demo, "_extract_frame_pipe", return_value=None), \
-             patch.object(subprocess, "Popen") as mock_popen:
-            proc_mock = MagicMock()
-            proc_mock.wait.return_value = 0
-            mock_popen.return_value = proc_mock
-            Path(out_path).write_bytes(b"\xff\xd8\xff")
-
-            args = ("video.mp4", 0.0, 42, out_path, 80)
-            _extract_single_frame(args)
-
-            call_kwargs = mock_popen.call_args[1]
-            assert call_kwargs.get("creationflags") == 0x00004000
+        mock_pipe.assert_called_once_with("video.mp4", 10.5, w, h)
 
 
 class TestBuildPopenPriorityKwargs:
