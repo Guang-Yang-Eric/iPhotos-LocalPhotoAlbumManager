@@ -95,42 +95,28 @@ def _build_contact_sheet_cmd(video_path, thumb_w, thumb_h, count,
            '-fflags', '+nobuffer']
 
     if hwaccel:
-        hw_out_fmt = _build_hwaccel_output_format(hwaccel)
-        cmd.extend(['-hwaccel', hwaccel,
-                    '-hwaccel_output_format', hw_out_fmt])
+        # Use -hwaccel WITHOUT -hwaccel_output_format so that FFmpeg
+        # hardware-decodes but auto-transfers frames to CPU memory.
+        # This is required because CPU-only filters (select, fps, tile)
+        # cannot operate on GPU-resident frames.  Omitting
+        # -hwaccel_output_format avoids the "Invalid output format bgra
+        # for hwframe download" error while still benefiting from HW decode.
+        cmd.extend(['-hwaccel', hwaccel])
 
     if keyframe_only:
         cmd.extend(['-skip_frame', 'nokey'])
 
     cmd.extend(['-i', video_path])
 
-    # Build the filter graph
-    # When using GPU hwaccel, frames come in GPU memory.  We need to
-    # download them to CPU before the tile filter (tile is CPU-only).
+    # Build the filter graph — all filters run on CPU frames.
     parts = []
 
     if keyframe_only:
         parts.append("select='eq(pict_type\\,I)'")
 
     parts.append(f'fps={fps_rate:.6f}')
-
-    if hwaccel:
-        scale_filter = hw['scale_filter']
-        download = hw['download_filter']
-        if scale_filter.startswith('scale_') and download:
-            parts.append(f'{scale_filter}={thumb_w}:{thumb_h}')
-            parts.append(download)
-            parts.append('format=bgra')
-        elif download:
-            parts.append(download)
-            parts.append(f'scale={thumb_w}:{thumb_h}')
-            parts.append('format=bgra')
-        else:
-            parts.append(f'scale={thumb_w}:{thumb_h}')
-            parts.append('format=bgra')
-    else:
-        parts.append(f'scale={thumb_w}:{thumb_h}')
-        parts.append('format=bgra')
+    parts.append(f'scale={thumb_w}:{thumb_h}')
+    parts.append('format=bgra')
 
     # tile=Nx1 assembles N frames into a single horizontal row.
     # padding=0 removes any gap between cells.
@@ -221,39 +207,25 @@ def _build_single_pass_cmd(video_path, thumb_w, thumb_h, fps_rate,
            '-fflags', '+nobuffer']
 
     if hwaccel_name:
-        hw_out_fmt = _build_hwaccel_output_format(hwaccel_name)
-        cmd.extend(['-hwaccel', hwaccel_name,
-                    '-hwaccel_output_format', hw_out_fmt])
+        # Use -hwaccel WITHOUT -hwaccel_output_format so that FFmpeg
+        # hardware-decodes but auto-transfers frames to CPU memory.
+        # This is required because CPU-only filters (select, fps) cannot
+        # operate on GPU-resident frames.
+        cmd.extend(['-hwaccel', hwaccel_name])
 
     if keyframe_only:
         cmd.extend(['-skip_frame', 'nokey'])
 
     cmd.extend(['-i', video_path])
 
-    # Build filter chain
+    # Build filter chain — all filters run on CPU frames.
     parts = []
     if keyframe_only:
         parts.append("select='eq(pict_type\\,I)'")
 
     parts.append(f'fps={fps_rate:.6f}')
-
-    if hwaccel_name:
-        scale_filter = hw['scale_filter']
-        download = hw['download_filter']
-        if scale_filter.startswith('scale_') and download:
-            parts.append(f'{scale_filter}={thumb_w}:{thumb_h}')
-            parts.append(download)
-            parts.append('format=bgra')
-        elif download:
-            parts.append(download)
-            parts.append(f'scale={thumb_w}:{thumb_h}')
-            parts.append('format=bgra')
-        else:
-            parts.append(f'scale={thumb_w}:{thumb_h}')
-            parts.append('format=bgra')
-    else:
-        parts.append(f'scale={thumb_w}:{thumb_h}')
-        parts.append('format=bgra')
+    parts.append(f'scale={thumb_w}:{thumb_h}')
+    parts.append('format=bgra')
 
     vf = ','.join(parts)
     cmd.extend(['-vf', vf, '-an', '-f', 'rawvideo', '-vsync', 'vfr',

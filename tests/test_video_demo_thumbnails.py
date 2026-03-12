@@ -645,7 +645,11 @@ class TestBuildSinglePassCmd:
     """Tests for _build_single_pass_cmd()."""
 
     def test_gpu_keyframe_command(self) -> None:
-        """GPU + keyframe-only uses detected hwaccel (not -hwaccel auto)."""
+        """GPU + keyframe-only uses detected hwaccel (not -hwaccel auto).
+
+        -hwaccel is present but NOT -hwaccel_output_format — frames are
+        auto-transferred to CPU so that CPU filters (select, fps) work.
+        """
         # Pre-seed the cache with a known hwaccel
         hwaccel_mod._hwaccel_cache = {
             'hwaccel': 'cuda',
@@ -661,6 +665,8 @@ class TestBuildSinglePassCmd:
         # Verify the exact hwaccel argument is 'cuda', not 'auto'
         hwaccel_idx = cmd.index('-hwaccel')
         assert cmd[hwaccel_idx + 1] == 'cuda'
+        # Must NOT have -hwaccel_output_format (would keep frames in GPU)
+        assert '-hwaccel_output_format' not in cmd
         assert '-skip_frame' in cmd
         assert 'nokey' in cmd
         assert '-an' in cmd
@@ -678,9 +684,10 @@ class TestBuildSinglePassCmd:
         assert 'format=bgra' in vf
         assert "select=" in vf
         assert "pict_type" in vf
-        # GPU path should use scale_cuda + hwdownload
-        assert 'scale_cuda=80:42' in vf
-        assert 'hwdownload' in vf
+        # GPU path uses CPU scale (no GPU scale/hwdownload needed when
+        # -hwaccel_output_format is absent — frames already in CPU).
+        assert 'scale=80:42' in vf
+        assert 'hwdownload' not in vf
 
     def test_cpu_keyframe_command(self) -> None:
         """CPU + keyframe-only: no -hwaccel, has -skip_frame."""
@@ -1447,7 +1454,11 @@ class TestBuildContactSheetCmd:
         assert 'padding=0' in vf
 
     def test_gpu_keyframe_uses_detected_hwaccel(self) -> None:
-        """GPU path uses detected hwaccel, not -hwaccel auto."""
+        """GPU path uses -hwaccel but NOT -hwaccel_output_format.
+
+        Omitting -hwaccel_output_format ensures frames are auto-transferred
+        to CPU so CPU-only filters (select, fps, tile) work correctly.
+        """
         hwaccel_mod._hwaccel_cache = {
             'hwaccel': 'cuda', 'scale_filter': 'scale_cuda',
             'download_filter': 'hwdownload', 'pix_fmt': 'bgra',
@@ -1459,10 +1470,13 @@ class TestBuildContactSheetCmd:
         assert '-hwaccel' in cmd
         hwaccel_idx = cmd.index('-hwaccel')
         assert cmd[hwaccel_idx + 1] == 'cuda'
+        # Must NOT have -hwaccel_output_format (would keep frames in GPU)
+        assert '-hwaccel_output_format' not in cmd
         vf_idx = cmd.index('-vf')
         vf = cmd[vf_idx + 1]
-        assert 'scale_cuda=80:42' in vf
-        assert 'hwdownload' in vf
+        # Uses CPU scale (no GPU scale/hwdownload — frames already in CPU)
+        assert 'scale=80:42' in vf
+        assert 'hwdownload' not in vf
         assert 'tile=5x1' in vf
 
     def test_cpu_full_decode(self) -> None:
