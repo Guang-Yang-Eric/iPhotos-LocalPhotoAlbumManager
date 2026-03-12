@@ -457,7 +457,7 @@ class TestExtractSingleFrame:
         assert result is None
 
     def test_returns_none_without_thumb_w(self) -> None:
-        """When no thumb_w (3-tuple args), returns None."""
+        """When no thumb_w (3-tuple args), gracefully returns None."""
         args = ("video.mp4", 5.0, 42)
         result = _extract_single_frame(args)
 

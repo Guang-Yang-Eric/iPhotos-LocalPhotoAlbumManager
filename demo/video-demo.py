@@ -876,6 +876,7 @@ def _extract_single_frame(args):
     temp files and JPEG encode/decode overhead entirely.
 
     Args format: (video_path, timestamp, thumb_h, thumb_w)
+        thumb_w is optional — if only 3 elements are provided, returns None.
 
     Returns either:
       - ('pipe', width, height, bytes)  on success, or
@@ -884,7 +885,7 @@ def _extract_single_frame(args):
     video_path = args[0]
     timestamp = args[1]
     thumb_h = args[2]
-    thumb_w = args[3] if len(args) >= 4 else None
+    thumb_w = args[3] if len(args) > 3 else None
 
     if thumb_w is not None and thumb_w > 0:
         result = _extract_frame_pipe(video_path, timestamp, thumb_w, thumb_h)
@@ -1622,7 +1623,7 @@ class VideoEditor(QMainWindow):
             ).copy()
             pix = QPixmap.fromImage(img)
         else:
-            # ffmpeg subprocess path: BGRA format
+            # Pipe-based extraction: BGRA format
             _, w, h, buf = result
             img = QImage(
                 buf, w, h, w * 4, QImage.Format.Format_ARGB32,
