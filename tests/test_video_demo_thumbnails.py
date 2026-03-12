@@ -47,6 +47,7 @@ _parse_rotation_from_ffprobe = video_demo._parse_rotation_from_ffprobe
 _displaymatrix_has_vflip = video_demo._displaymatrix_has_vflip
 _get_keyframe_timestamps_pyav = video_demo._get_keyframe_timestamps_pyav
 _snap_to_keyframes = video_demo._snap_to_keyframes
+_pyav_open_with_hw = video_demo._pyav_open_with_hw
 
 
 @pytest.fixture(autouse=True)
@@ -1303,3 +1304,176 @@ class TestSnapToKeyframes:
         result = _snap_to_keyframes([2.0, 4.0], keyframes)
         assert result[0] == (0, 2.0)
         assert result[1] == (1, 4.0)
+
+
+# ---------------------------------------------------------------------------
+# PyAV HWAccel opener tests
+# ---------------------------------------------------------------------------
+
+class TestPyavOpenWithHw:
+    """Tests for _pyav_open_with_hw() (CUDA hwaccel + software fallback)."""
+
+    def test_uses_hwaccel_when_available(self) -> None:
+        """When HAS_PYAV_HWACCEL is True, opens with HWAccel kwarg."""
+        mock_container = MagicMock()
+        mock_stream = MagicMock()
+        mock_container.streams.video = [mock_stream]
+
+        mock_hw_instance = MagicMock()
+
+        with patch.object(video_demo, 'HAS_PYAV_HWACCEL', True), \
+             patch.object(video_demo, '_HWAccel', return_value=mock_hw_instance) as mock_hwaccel_cls, \
+             patch.object(video_demo, '_av_module') as mock_av:
+            mock_av.open.return_value = mock_container
+            container, stream = _pyav_open_with_hw("test.mp4")
+
+        mock_hwaccel_cls.assert_called_once_with(
+            device_type='cuda', allow_software_fallback=True,
+        )
+        mock_av.open.assert_called_once_with("test.mp4", hwaccel=mock_hw_instance)
+        assert container is mock_container
+        assert stream is mock_stream
+
+    def test_falls_back_to_cpu_when_hwaccel_init_fails(self) -> None:
+        """When HWAccel constructor raises, falls back to plain open."""
+        mock_container = MagicMock()
+        mock_stream = MagicMock()
+        mock_container.streams.video = [mock_stream]
+
+        with patch.object(video_demo, 'HAS_PYAV_HWACCEL', True), \
+             patch.object(video_demo, '_HWAccel', side_effect=RuntimeError("no CUDA")), \
+             patch.object(video_demo, '_av_module') as mock_av:
+            mock_av.open.return_value = mock_container
+            container, stream = _pyav_open_with_hw("test.mp4")
+
+        # Should fall through to plain open (without hwaccel kwarg)
+        mock_av.open.assert_called_once_with("test.mp4")
+        assert container is mock_container
+
+    def test_falls_back_when_open_with_hwaccel_fails(self) -> None:
+        """When av.open(hwaccel=...) fails, falls back to plain open."""
+        mock_container = MagicMock()
+        mock_stream = MagicMock()
+        mock_container.streams.video = [mock_stream]
+
+        call_count = 0
+
+        def fake_open(path, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if 'hwaccel' in kwargs:
+                raise RuntimeError("GPU decode failed")
+            return mock_container
+
+        with patch.object(video_demo, 'HAS_PYAV_HWACCEL', True), \
+             patch.object(video_demo, '_HWAccel', return_value=MagicMock()), \
+             patch.object(video_demo, '_av_module') as mock_av:
+            mock_av.open.side_effect = fake_open
+            container, stream = _pyav_open_with_hw("test.mp4")
+
+        assert call_count == 2  # first with hwaccel, then plain
+        assert container is mock_container
+
+    def test_cpu_only_when_no_hwaccel_module(self) -> None:
+        """When HAS_PYAV_HWACCEL is False, opens without hwaccel."""
+        mock_container = MagicMock()
+        mock_stream = MagicMock()
+        mock_container.streams.video = [mock_stream]
+
+        with patch.object(video_demo, 'HAS_PYAV_HWACCEL', False), \
+             patch.object(video_demo, '_av_module') as mock_av:
+            mock_av.open.return_value = mock_container
+            container, stream = _pyav_open_with_hw("test.mp4")
+
+        mock_av.open.assert_called_once_with("test.mp4")
+        assert container is mock_container
+        assert stream is mock_stream
+
+    def test_returns_first_video_stream(self) -> None:
+        """Returns the first video stream from the container."""
+        mock_stream_0 = MagicMock(name="video_stream_0")
+        mock_stream_1 = MagicMock(name="video_stream_1")
+        mock_container = MagicMock()
+        mock_container.streams.video = [mock_stream_0, mock_stream_1]
+
+        with patch.object(video_demo, 'HAS_PYAV_HWACCEL', False), \
+             patch.object(video_demo, '_av_module') as mock_av:
+            mock_av.open.return_value = mock_container
+            _, stream = _pyav_open_with_hw("multi_stream.mp4")
+
+        assert stream is mock_stream_0
+
+
+class TestPyavExtractSegmentHwAccel:
+    """Tests for hardware frame handling in _pyav_extract_segment()."""
+
+    def test_hw_frame_uses_reformat(self) -> None:
+        """When frame.format.name is a HW format, uses reformat path."""
+        from fractions import Fraction
+        time_base = Fraction(1, 30000)
+
+        mock_img = MagicMock()
+        mock_img.tobytes.return_value = b'\x00' * (80 * 42 * 3)
+
+        # Create a frame with a hardware pixel format
+        hw_frame = MagicMock()
+        hw_frame.format.name = 'cuda'
+        # reformat returns a CPU frame whose to_image returns mock_img
+        cpu_frame = MagicMock()
+        cpu_frame.to_image.return_value = mock_img
+        hw_frame.reformat.return_value = cpu_frame
+
+        mock_stream = MagicMock()
+        mock_stream.time_base = time_base
+
+        mock_container = MagicMock()
+        mock_container.streams.video = [mock_stream]
+        mock_container.decode.return_value = iter([hw_frame])
+
+        indices = [(0, 0.0)]
+        with patch.object(video_demo, '_av_module') as mock_av:
+            mock_av.open.return_value = mock_container
+            results = _pyav_extract_segment("t.mp4", indices, 80, 42)
+
+        # Should call reformat on the hardware frame
+        hw_frame.reformat.assert_called_once_with(
+            width=80, height=42, format='rgb24',
+        )
+        # Should NOT call to_image on the hardware frame
+        hw_frame.to_image.assert_not_called()
+        # Should call to_image on the reformatted CPU frame (no args)
+        cpu_frame.to_image.assert_called_once_with()
+        assert len(results) == 1
+
+    def test_sw_frame_uses_to_image(self) -> None:
+        """When frame.format.name is a SW format, uses to_image path."""
+        from fractions import Fraction
+        time_base = Fraction(1, 30000)
+
+        mock_img = MagicMock()
+        mock_img.tobytes.return_value = b'\x00' * (80 * 42 * 3)
+
+        # Frame with software pixel format (not in _HW_PIX_FMTS)
+        sw_frame = MagicMock()
+        sw_frame.format.name = 'yuv420p'
+        sw_frame.to_image.return_value = mock_img
+
+        mock_stream = MagicMock()
+        mock_stream.time_base = time_base
+
+        mock_container = MagicMock()
+        mock_container.streams.video = [mock_stream]
+        mock_container.decode.return_value = iter([sw_frame])
+
+        indices = [(0, 0.0)]
+        with patch.object(video_demo, '_av_module') as mock_av:
+            mock_av.open.return_value = mock_container
+            results = _pyav_extract_segment("t.mp4", indices, 80, 42)
+
+        # Should NOT call reformat
+        sw_frame.reformat.assert_not_called()
+        # Should call to_image with dimensions
+        sw_frame.to_image.assert_called_once_with(
+            width=80, height=42, interpolation='FAST_BILINEAR',
+        )
+        assert len(results) == 1

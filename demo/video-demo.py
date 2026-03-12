@@ -13,6 +13,16 @@ except ImportError:
     _av_module = None
     HAS_PYAV = False
 
+# PyAV native CUDA hardware acceleration (PyAV >= 12 / 2024+)
+HAS_PYAV_HWACCEL = False
+_HWAccel = None
+if HAS_PYAV:
+    try:
+        from av.codec.hwaccel import HWAccel as _HWAccel
+        HAS_PYAV_HWACCEL = True
+    except ImportError:
+        pass
+
 try:
     from PIL import Image as _PILImage
 except ImportError:
@@ -48,6 +58,13 @@ PYAV_MAX_WORKERS = 4
 # Max concurrent ffmpeg slices for the sliced subprocess strategy
 MAX_FFMPEG_SLICES = 3
 # Extra frames to read beyond expected count (fps filter rounding tolerance)
+
+# Hardware pixel formats reported by PyAV for GPU-decoded frames.
+# When a frame uses one of these formats, it must be reformatted (GPU→CPU
+# transfer) before to_image() can operate on the pixel data.
+_HW_PIX_FMTS = frozenset({
+    'cuda', 'dxva2', 'd3d11', 'vaapi', 'vdpau', 'qsv', 'videotoolbox',
+})
 FRAME_READ_BUFFER = 3
 
 # --- 3. 样式表 (QSS) ---
@@ -215,14 +232,41 @@ def _displaymatrix_has_vflip(dm_string):
 # PyAV-based extraction (no subprocess, direct C API via libav)
 # ---------------------------------------------------------------------------
 
+def _pyav_open_with_hw(video_path):
+    """Open a video container with CUDA hardware acceleration if available.
+
+    Uses PyAV's native HWAccel API (PyAV >= 12 / 2024+) to enable GPU-
+    accelerated decoding.  ``allow_software_fallback=True`` ensures the
+    function works identically on machines without an NVIDIA GPU — it
+    silently falls back to CPU decode.
+
+    Returns (container, stream) where *stream* is the first video stream.
+    """
+    if HAS_PYAV_HWACCEL:
+        try:
+            hw = _HWAccel(device_type='cuda',
+                          allow_software_fallback=True)
+            container = _av_module.open(video_path, hwaccel=hw)
+            stream = container.streams.video[0]
+            print("[pyav] Opened with CUDA hwaccel")
+            return container, stream
+        except Exception as e:
+            # HWAccel init failed (e.g. no CUDA driver) — fall through
+            print(f"[pyav] CUDA hwaccel init failed, using CPU: {e}")
+
+    # Fallback: plain CPU decode
+    container = _av_module.open(video_path)
+    stream = container.streams.video[0]
+    return container, stream
+
+
 def _get_video_info_pyav(video_path):
     """Probe video display dimensions, duration, rotation and vflip via PyAV.
 
     Returns (display_w, display_h, duration, rotation, vflip).
     """
     try:
-        container = _av_module.open(video_path)
-        stream = container.streams.video[0]
+        container, stream = _pyav_open_with_hw(video_path)
         width = stream.codec_context.width
         height = stream.codec_context.height
         duration = 0.0
@@ -323,8 +367,7 @@ def _get_keyframe_timestamps_pyav(video_path):
     keyframes = []
     container = None
     try:
-        container = _av_module.open(video_path)
-        stream = container.streams.video[0]
+        container, stream = _pyav_open_with_hw(video_path)
         time_base = stream.time_base
         for packet in container.demux(stream):
             if packet.pts is None:
@@ -406,8 +449,7 @@ def _pyav_extract_segment(video_path, indices, thumb_w, thumb_h,
     results = []
     container = None
     try:
-        container = _av_module.open(video_path)
-        stream = container.streams.video[0]
+        container, stream = _pyav_open_with_hw(video_path)
         stream.thread_type = 'AUTO'
         # Limit threads per worker to avoid contention across workers
         stream.codec_context.thread_count = 2
@@ -425,10 +467,20 @@ def _pyav_extract_segment(video_path, indices, thumb_w, thumb_h,
             container.seek(max(0, target_pts), stream=stream)
 
             for frame in container.decode(stream):
-                img = frame.to_image(
-                    width=raw_w, height=raw_h,
-                    interpolation='FAST_BILINEAR',
+                # GPU → CPU transfer: reformat hwaccel frames before
+                # to_image() to avoid repeated GPU⇄CPU copies.
+                pix_fmt = getattr(
+                    getattr(frame, 'format', None), 'name', '',
                 )
+                if pix_fmt in _HW_PIX_FMTS:
+                    frame = frame.reformat(width=raw_w, height=raw_h,
+                                           format='rgb24')
+                    img = frame.to_image()
+                else:
+                    img = frame.to_image(
+                        width=raw_w, height=raw_h,
+                        interpolation='FAST_BILINEAR',
+                    )
 
                 # Apply orientation transforms (PyAV does NOT auto-rotate)
                 if rotation == 90:
@@ -487,8 +539,7 @@ def _extract_thumbnails_pyav(video_path, num_frames, thumb_w, thumb_h,
         list on failure.
     """
     try:
-        container = _av_module.open(video_path)
-        stream = container.streams.video[0]
+        container, stream = _pyav_open_with_hw(video_path)
 
         duration = 0.0
         if stream.duration and stream.time_base:
