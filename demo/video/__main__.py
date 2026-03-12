@@ -2,7 +2,7 @@
 
 import sys
 from PySide6.QtWidgets import QApplication
-from .ui import VideoEditor
+from ui import VideoEditor
 
 
 def main():

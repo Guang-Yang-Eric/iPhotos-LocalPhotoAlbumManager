@@ -18,8 +18,8 @@ import subprocess
 import sys
 import time
 
-from .config import PYAV_MAX_WORKERS, MAX_FFMPEG_SLICES, FRAME_READ_BUFFER
-from .hwaccel import _detect_hwaccel, _build_hwaccel_output_format
+from config import PYAV_MAX_WORKERS, MAX_FFMPEG_SLICES, FRAME_READ_BUFFER
+from hwaccel import _detect_hwaccel, _build_hwaccel_output_format
 
 try:
     import av as _av_module

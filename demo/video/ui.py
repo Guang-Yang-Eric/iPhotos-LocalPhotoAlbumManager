@@ -14,12 +14,12 @@ from PySide6.QtGui import QIcon, QPixmap, QImage, QPalette, QPainter, QPen
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
 
-from .config import (
+from config import (
     BAR_HEIGHT, THUMB_WIDTH, CORNER_RADIUS, BORDER_THICKNESS,
     THUMB_LOGICAL_HEIGHT, ARROW_THICKNESS, THEME_COLOR, HOVER_COLOR,
     ICON_PLAY, STYLESHEET, HIDPI_MODE,
 )
-from .worker import ThumbnailWorker
+from worker import ThumbnailWorker
 
 
 class HandleButton(QPushButton):

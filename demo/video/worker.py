@@ -20,12 +20,12 @@ import time
 
 from PySide6.QtCore import QThread, Signal
 
-from .config import (
+from config import (
     THUMB_WIDTH, FRAME_READ_BUFFER, MAX_FFMPEG_SLICES, HIDPI_MODE,
     THUMB_LOGICAL_HEIGHT,
 )
-from .probe import HAS_PYAV, _get_video_info, _get_video_info_pyav
-from .extraction import (
+from probe import HAS_PYAV, _get_video_info, _get_video_info_pyav
+from extraction import (
     _run_contact_sheet,
     _build_single_pass_cmd,
     _build_popen_priority_kwargs,
