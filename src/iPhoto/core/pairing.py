@@ -12,6 +12,11 @@ from dateutil import parser
 from ..config import LIVE_DURATION_PREFERRED, PAIR_TIME_DELTA_SEC
 from ..models.types import LiveGroup
 
+try:
+    from .._native import parse_dt_fast as _parse_dt_fast
+except Exception:
+    _parse_dt_fast = None  # type: ignore[assignment]
+
 
 def _parse_dt(value: str | None) -> datetime | None:
     if not value:
@@ -20,6 +25,23 @@ def _parse_dt(value: str | None) -> datetime | None:
         return parser.isoparse(value)
     except (ValueError, TypeError):
         return None
+
+
+def _parse_dt_us(value: str | None) -> int | None:
+    """Return Unix microsecond timestamp for *value*, or ``None`` on failure.
+
+    Uses the C-accelerated parser when available, otherwise falls back to
+    :func:`_parse_dt` via the dateutil library.
+    """
+    if not value:
+        return None
+    if _parse_dt_fast is not None:
+        return _parse_dt_fast(value)
+    dt = _parse_dt(value)
+    if dt is None:
+        return None
+    import math
+    return math.floor(dt.timestamp() * 1_000_000)
 
 
 _IMAGE_EXTENSIONS = {
@@ -146,15 +168,15 @@ def _match_by_time(
     candidates: Iterable[Dict[str, object]],
     used_videos: set[str],
 ) -> Dict[str, object] | None:
-    photo_dt = _parse_dt(photo.get("dt"))
+    photo_us = _parse_dt_us(photo.get("dt"))
     best: Tuple[float, Dict[str, object]] | None = None
     for candidate in candidates:
         if candidate["rel"] in used_videos:
             continue
-        video_dt = _parse_dt(candidate.get("dt"))
-        if not photo_dt or not video_dt:
+        video_us = _parse_dt_us(candidate.get("dt"))
+        if photo_us is None or video_us is None:
             continue
-        delta = abs((photo_dt - video_dt).total_seconds())
+        delta = abs(photo_us - video_us) / 1_000_000.0
         if delta > PAIR_TIME_DELTA_SEC:
             continue
         if best is None or delta < best[0]:
