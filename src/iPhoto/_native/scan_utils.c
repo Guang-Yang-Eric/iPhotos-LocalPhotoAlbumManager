@@ -98,8 +98,12 @@ int64_t parse_iso8601_to_unix_us(const char *s) {
     }
     /* No timezone marker: treat as UTC (consistent with dateutil.isoparse). */
 
-    time_t epoch = timegm(&t);
-    if (epoch == (time_t)-1) return INT64_MIN;
+    #ifdef _WIN32
+        time_t epoch = _mkgmtime(&t);
+    #else
+        time_t epoch = timegm(&t);
+    #endif
+        if (epoch == (time_t)-1) return INT64_MIN;
 
     return (int64_t)(epoch - tz_offset_sec) * 1000000LL + us;
 }
