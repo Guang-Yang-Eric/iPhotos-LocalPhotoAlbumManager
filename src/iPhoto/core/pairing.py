@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -12,10 +13,25 @@ from dateutil import parser
 from ..config import LIVE_DURATION_PREFERRED, PAIR_TIME_DELTA_SEC
 from ..models.types import LiveGroup
 
+_logger = logging.getLogger(__name__)
+
 try:
     from .._native import parse_dt_fast as _parse_dt_fast
 except Exception:
     _parse_dt_fast = None  # type: ignore[assignment]
+
+# P6: C-accelerated content-ID normalisation (strip + casefold)
+try:
+    from .._native import normalise_content_id_fast as _normalise_content_id_fast  # type: ignore[attr-defined]
+    _NORMALISE_C = True
+    _logger.debug("pairing: C extension available for content-ID normalisation (P6)")
+except Exception:
+    _normalise_content_id_fast = None  # type: ignore[assignment]
+    _NORMALISE_C = False
+    _logger.debug(
+        "pairing: C extension unavailable for content-ID normalisation (P6) "
+        "— using Python fallback"
+    )
 
 
 def _parse_dt(value: str | None) -> datetime | None:
@@ -90,10 +106,17 @@ def _is_video(row: Dict[str, object]) -> bool:
 
 
 def _normalise_content_id(value: object) -> str | None:
-    """Return a stable comparison key for Live Photo content identifiers."""
+    """Return a stable comparison key for Live Photo content identifiers.
 
+    Uses the C-accelerated implementation (P6) when available, falling back
+    to Python ``str.strip()`` + ``str.casefold()``.
+    """
     if not isinstance(value, str):
         return None
+
+    if _NORMALISE_C and _normalise_content_id_fast is not None:
+        return _normalise_content_id_fast(value)
+
     trimmed = value.strip()
     if not trimmed:
         return None

@@ -265,4 +265,158 @@ int should_include_c(
     return 0;
 }
 
-#endif  /* !_WIN32 */
+#endif  /* !_WIN32 — P3 */
+
+
+/* =====================================================================
+ * P4: discover_files_c
+ * ===================================================================== */
+
+#if !defined(_WIN32)
+
+#include <ftw.h>
+#include <strings.h>   /* strcasecmp */
+
+/* Supported media file extensions (lower-case; matched case-insensitively). */
+static const char *_SUPPORTED_EXT[] = {
+    ".jpg", ".jpeg", ".png", ".heic", ".heif", ".heifs", ".heicf",
+    ".mov", ".mp4",  ".m4v", ".qt",   ".avi",  ".wmv",  ".mkv",
+    ".dng", ".cr2",  ".cr3", ".nef",  ".arw",  ".raf",
+    NULL
+};
+
+/* Callback type for discover_files_c. */
+typedef void (*FileFoundCallback)(const char *path, void *userdata);
+
+/* Per-call state (single-threaded file discovery path in this codebase). */
+static FileFoundCallback _g_cb    = NULL;
+static void             *_g_udata = NULL;
+
+static int _nftw_visitor(const char *fpath, const struct stat *sb,
+                         int typeflag, struct FTW *ftwbuf) {
+    (void)sb;
+    const char *base = fpath + ftwbuf->base;
+
+    /* Skip hidden directories (name starts with '.') and their subtrees. */
+    if ((typeflag == FTW_D || typeflag == FTW_DNR) && base[0] == '.')
+        return FTW_SKIP_SUBTREE;
+
+    /* Only handle regular files. */
+    if (typeflag != FTW_F)
+        return FTW_CONTINUE;
+
+    /* Check extension (case-insensitive). */
+    const char *dot = strrchr(base, '.');
+    if (!dot)
+        return FTW_CONTINUE;
+
+    for (int i = 0; _SUPPORTED_EXT[i]; i++) {
+        if (strcasecmp(dot, _SUPPORTED_EXT[i]) == 0) {
+            if (_g_cb)
+                _g_cb(fpath, _g_udata);
+            return FTW_CONTINUE;
+        }
+    }
+    return FTW_CONTINUE;
+}
+
+/**
+ * discover_files_c
+ *
+ * Walk root_dir recursively (without following symlinks) and invoke
+ * callback(path, userdata) for every supported media file found.
+ * Hidden directories (name starts with '.') are skipped entirely.
+ *
+ * Uses process-global callback state; safe only for single-threaded
+ * callers (file discovery always runs before the thread pool in this
+ * codebase, so this is acceptable).
+ */
+void discover_files_c(const char *root_dir,
+                      FileFoundCallback callback,
+                      void *userdata) {
+    _g_cb    = callback;
+    _g_udata = userdata;
+    nftw(root_dir, _nftw_visitor, 64,
+         FTW_PHYS            /* do not follow symlinks */
+         | FTW_ACTIONRETVAL  /* enable FTW_SKIP_SUBTREE / FTW_CONTINUE */
+    );
+    _g_cb    = NULL;
+    _g_udata = NULL;
+}
+
+#endif  /* !_WIN32 — P4 */
+
+
+/* =====================================================================
+ * P5: parse_iso8601_full_c
+ * ===================================================================== */
+
+/**
+ * parse_iso8601_full_c
+ *
+ * Like parse_iso8601_to_unix_us but also writes the calendar year and
+ * month (1-based) into *out_year and *out_month.
+ * Returns 0 on success, -1 on parse failure.
+ */
+int parse_iso8601_full_c(const char *s,
+                         int64_t *out_unix_us,
+                         int     *out_year,
+                         int     *out_month) {
+    int64_t us = parse_iso8601_to_unix_us(s);
+    if (us == INT64_MIN)
+        return -1;
+
+    /* Re-read year and month directly from the already-validated string. */
+    *out_unix_us = us;
+    *out_year    = _read_n_digits(s,     4);
+    *out_month   = _read_n_digits(s + 5, 2);
+    return 0;
+}
+
+
+/* =====================================================================
+ * P6: normalise_content_id_c
+ * ===================================================================== */
+
+#include <ctype.h>
+
+/**
+ * normalise_content_id_c
+ *
+ * Normalise a Live Photo content identifier:
+ *   1. Strip leading and trailing ASCII whitespace.
+ *   2. Fold to lower-case (ASCII only — content IDs are UUIDs).
+ *
+ * Copies at most out_size-1 bytes from in_str into out_buf and always
+ * NUL-terminates.  Returns the length of the normalised string (0 if
+ * the result is empty), or -1 if in_str/out_buf is NULL or out_size <= 0.
+ */
+int normalise_content_id_c(const char *in_str, char *out_buf, int out_size) {
+    if (!in_str || !out_buf || out_size <= 0)
+        return -1;
+
+    /* Skip leading whitespace. */
+    const char *start = in_str;
+    while (*start == ' ' || *start == '\t' || *start == '\r' || *start == '\n')
+        start++;
+
+    /* Trim trailing whitespace. */
+    const char *end = start + strlen(start);
+    while (end > start &&
+           (end[-1] == ' ' || end[-1] == '\t' ||
+            end[-1] == '\r' || end[-1] == '\n'))
+        end--;
+
+    int len = (int)(end - start);
+    if (len == 0) {
+        out_buf[0] = '\0';
+        return 0;
+    }
+
+    /* Copy with lower-casing, honouring out_size. */
+    int copy = (len < out_size - 1) ? len : out_size - 1;
+    for (int i = 0; i < copy; i++)
+        out_buf[i] = (char)tolower((unsigned char)start[i]);
+    out_buf[copy] = '\0';
+    return copy;
+}
