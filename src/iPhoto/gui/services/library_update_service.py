@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -17,11 +18,13 @@ from ..background_task_manager import BackgroundTaskManager
 # Updated imports to new location
 from ...library.workers.rescan_worker import RescanSignals, RescanWorker
 from ...library.workers.scanner_worker import ScannerSignals, ScannerWorker
+from ...utils.logging import get_logger
 
 if TYPE_CHECKING:
     from ...library.manager import LibraryManager
     from ...models.album import Album
 
+LOGGER = get_logger()
 
 @dataclass
 class MoveOperationResult:
@@ -48,6 +51,11 @@ class LibraryUpdateService(QObject):
     scanProgress = Signal(Path, int, int)
     scanChunkReady = Signal(Path, list)
     scanFinished = Signal(Path, bool)
+    # Emitted just before scanFinished with the wall-clock elapsed seconds for
+    # the completed async scan.  Consumers (e.g. the status bar) can use this
+    # to display "Scan complete. (2.3 s)" without changing the scanFinished
+    # signature.
+    scanElapsed = Signal(Path, float)
     indexUpdated = Signal(Path)
     linksUpdated = Signal(Path)
     assetReloadRequested = Signal(Path, bool, bool)
@@ -73,6 +81,9 @@ class LibraryUpdateService(QObject):
         self._stale_album_roots: Dict[str, Path] = {}
         self._album_root_cache: Dict[str, Optional[Path]] = {}
         self._model_loading_due_to_scan = False
+        # Wall-clock time (perf_counter) recorded when the most recent async
+        # scan was submitted.  Reset to None after the elapsed value is emitted.
+        self._scan_start_time: Optional[float] = None
 
     # ------------------------------------------------------------------
     # Public API used by :class:`~iPhoto.gui.facade.AppFacade`
@@ -125,6 +136,9 @@ class LibraryUpdateService(QObject):
         )
         self._scanner_worker = worker
         self._scan_pending = False
+
+        # Record start time for elapsed-time reporting.
+        self._scan_start_time = time.perf_counter()
 
         self._task_manager.submit_task(
             task_id=f"scan:{album.root}",
@@ -361,6 +375,28 @@ class LibraryUpdateService(QObject):
 
         self.scanChunkReady.emit(root, chunk)
 
+    def _emit_scan_elapsed(self, root: Path) -> None:
+        """Compute elapsed time since the last :meth:`rescan_album_async` call,
+        log the C-acceleration banner + timing, and emit :attr:`scanElapsed`.
+
+        Resets :attr:`_scan_start_time` to ``None`` after emission so that a
+        subsequent :meth:`handle_scan_finished` triggered by an unrelated scan
+        (e.g. from the library manager) does not inherit stale timing.
+        """
+        from ..._native import acceleration_report  # lazy import avoids circular deps
+
+        elapsed = (
+            time.perf_counter() - self._scan_start_time
+            if self._scan_start_time is not None
+            else 0.0
+        )
+        self._scan_start_time = None
+
+        LOGGER.info("%s", acceleration_report())
+        LOGGER.info("GUI scan of %s completed in %.3f s", root, elapsed)
+
+        self.scanElapsed.emit(root, elapsed)
+
     def _on_scan_finished(
         self,
         worker: ScannerWorker,
@@ -373,6 +409,7 @@ class LibraryUpdateService(QObject):
             return
 
         if worker.cancelled:
+            self._emit_scan_elapsed(root)
             self.scanFinished.emit(root, True)
             should_restart = self._scan_pending
             self._cleanup_scan_worker()
@@ -381,6 +418,7 @@ class LibraryUpdateService(QObject):
             return
 
         if worker.failed:
+            self._emit_scan_elapsed(root)
             self.scanFinished.emit(root, False)
             should_restart = self._scan_pending
             self._cleanup_scan_worker()
@@ -463,6 +501,7 @@ class LibraryUpdateService(QObject):
             backend._ensure_links(root, materialised_rows, library_root=library_root)
         except IPhotoError as exc:
             self.errorRaised.emit(str(exc))
+            self._emit_scan_elapsed(root)
             self.scanFinished.emit(root, False)
         else:
             self.indexUpdated.emit(root)
@@ -473,6 +512,7 @@ class LibraryUpdateService(QObject):
             if not self._model_loading_due_to_scan:
                 self.assetReloadRequested.emit(root, False, False)
             self._model_loading_due_to_scan = False
+            self._emit_scan_elapsed(root)
             self.scanFinished.emit(root, True)
 
         should_restart = self._scan_pending
@@ -491,6 +531,7 @@ class LibraryUpdateService(QObject):
             return
 
         self.errorRaised.emit(message)
+        self._emit_scan_elapsed(root)
         self.scanFinished.emit(root, False)
 
         should_restart = self._scan_pending
