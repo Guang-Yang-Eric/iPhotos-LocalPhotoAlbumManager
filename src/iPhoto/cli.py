@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 import sys
 
@@ -36,7 +37,11 @@ app.add_typer(cover_app, name="cover")
 app.add_typer(feature_app, name="feature")
 
 
+import functools
+
+
 def _handle_errors(func):
+    @functools.wraps(func)
     def wrapper(*args, **kwargs):
         try:
             return func(*args, **kwargs)
@@ -65,9 +70,18 @@ def init(album_dir: Path = typer.Argument(Path.cwd(), exists=False)) -> None:
 @_handle_errors
 def scan(album_dir: Path = typer.Argument(Path.cwd(), exists=True)) -> None:
     """Scan files and update the index cache."""
+    from iPhoto._native import acceleration_report  # type: ignore[attr-defined]
 
+    # Print C-acceleration status so the user can compare C vs Python runs.
+    typer.echo(acceleration_report())
+    typer.echo(f"Scanning {album_dir} …")
+
+    t0 = time.perf_counter()
     rows = app_facade.rescan(album_dir)
+    elapsed = time.perf_counter() - t0
+
     print(f"[green]Indexed {len(rows)} assets")
+    typer.echo(f"Scan completed in {elapsed:.3f}s")
 
 
 @app.command()

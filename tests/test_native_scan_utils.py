@@ -699,3 +699,137 @@ class TestParallelScannerWithP4:
         names = {p.name for p in found_paths}
         assert "visible.jpg" in names
         assert "hidden.jpg" not in names
+
+
+# ---------------------------------------------------------------------------
+# acceleration_report() — human-readable C/Python status banner
+# ---------------------------------------------------------------------------
+
+class TestAccelerationReport:
+    """Tests for acceleration_report() — the user-facing diagnostic banner."""
+
+    def test_returns_string(self):
+        from iPhoto._native import acceleration_report
+        assert isinstance(acceleration_report(), str)
+
+    def test_contains_c_acceleration_header(self):
+        from iPhoto._native import acceleration_report
+        report = acceleration_report()
+        assert "C acceleration" in report
+
+    def test_contains_enabled_or_disabled(self):
+        from iPhoto._native import acceleration_report, _C_AVAILABLE
+        report = acceleration_report()
+        if _C_AVAILABLE:
+            assert "ENABLED" in report
+        else:
+            assert "DISABLED" in report
+
+    def test_lists_all_six_hotspots(self):
+        from iPhoto._native import acceleration_report
+        report = acceleration_report()
+        for priority in ("P1", "P2", "P3", "P4", "P5", "P6"):
+            assert priority in report, f"Missing hotspot {priority} in report"
+
+    def test_checkmark_when_c_available(self):
+        from iPhoto._native import acceleration_report, _C_AVAILABLE
+        report = acceleration_report()
+        if _C_AVAILABLE:
+            assert "✓" in report
+            assert "✗" not in report
+        else:
+            assert "✗" in report
+            assert "✓" not in report
+
+    def test_consistent_with_c_available_flag(self):
+        """The banner must truthfully reflect _C_AVAILABLE."""
+        from iPhoto._native import acceleration_report, _C_AVAILABLE
+        report = acceleration_report()
+        if _C_AVAILABLE:
+            assert "ENABLED" in report
+            assert "DISABLED" not in report
+        else:
+            assert "DISABLED" in report
+            assert "ENABLED" not in report
+
+    def test_multiline(self):
+        """There must be at least 7 lines: one header + six hotspots."""
+        from iPhoto._native import acceleration_report
+        lines = acceleration_report().splitlines()
+        assert len(lines) >= 7, f"Expected ≥7 lines, got {len(lines)}: {lines}"
+
+    def test_hotspot_names_present(self):
+        """Key function names should appear in the report."""
+        from iPhoto._native import acceleration_report
+        report = acceleration_report()
+        for name in (
+            "parse_dt_fast",
+            "compute_file_id_fast",
+            "should_include_fast",
+            "discover_files_fast",
+            "parse_dt_full_fast",
+            "normalise_content_id_fast",
+        ):
+            assert name in report, f"Missing function name {name!r} in report"
+
+
+# ---------------------------------------------------------------------------
+# CLI scan — timing output and acceleration banner
+# ---------------------------------------------------------------------------
+
+class TestCliScanTiming:
+    """Verify that the CLI scan command prints the acceleration banner and timing."""
+
+    def _invoke_scan(self, album_dir):
+        """Invoke the CLI scan command and return the combined output."""
+        from typer.testing import CliRunner
+        from iPhoto.cli import app as cli_app
+
+        runner = CliRunner()
+        result = runner.invoke(cli_app, ["scan", str(album_dir)])
+        return result
+
+    def test_acceleration_banner_in_output(self, tmp_path):
+        """The scan command must print 'C acceleration' before scanning."""
+        import unittest.mock as mock
+
+        with mock.patch("iPhoto.app.rescan", return_value=[]):
+            result = self._invoke_scan(tmp_path)
+
+        assert result.exit_code == 0, result.output
+        assert "C acceleration" in result.output
+
+    def test_timing_line_in_output(self, tmp_path):
+        """The scan command must print a 'Scan completed in …s' line."""
+        import unittest.mock as mock
+
+        with mock.patch("iPhoto.app.rescan", return_value=[]):
+            result = self._invoke_scan(tmp_path)
+
+        assert result.exit_code == 0, result.output
+        assert "Scan completed in" in result.output
+        assert "s" in result.output  # seconds unit present
+
+    def test_asset_count_still_printed(self, tmp_path):
+        """The existing 'Indexed N assets' line must still appear."""
+        import unittest.mock as mock
+
+        with mock.patch("iPhoto.app.rescan", return_value=[{}, {}]):
+            result = self._invoke_scan(tmp_path)
+
+        assert result.exit_code == 0, result.output
+        assert "2 assets" in result.output
+
+    def test_timing_is_non_negative(self, tmp_path):
+        """The elapsed time must be a non-negative float."""
+        import re
+        import unittest.mock as mock
+
+        with mock.patch("iPhoto.app.rescan", return_value=[]):
+            result = self._invoke_scan(tmp_path)
+
+        assert result.exit_code == 0, result.output
+        match = re.search(r"Scan completed in ([\d.]+)s", result.output)
+        assert match is not None, f"No timing line found in: {result.output}"
+        elapsed = float(match.group(1))
+        assert elapsed >= 0.0

@@ -404,3 +404,53 @@ def normalise_content_id_fast(value: object) -> str | None:
 
     trimmed = value.strip()
     return trimmed.casefold() if trimmed else None
+
+
+# =====================================================================
+# Public diagnostics
+# =====================================================================
+
+#: Human-readable description for each hotspot, keyed by priority label.
+_HOTSPOT_DESCRIPTIONS: dict[str, str] = {
+    "P1": "parse_dt_fast             ISO 8601 → Unix µs timestamp",
+    "P2": "compute_file_id_fast      XXH3 128-bit file hash",
+    "P3": "should_include_fast       glob filter (fnmatch)",
+    "P4": "discover_files_fast       nftw recursive directory walk",
+    "P5": "parse_dt_full_fast        ISO 8601 → (unix_us, year, month)",
+    "P6": "normalise_content_id_fast content-ID strip + casefold",
+}
+
+
+def acceleration_report() -> str:
+    """Return a human-readable acceleration status banner.
+
+    The banner lists all six scan hotspots (P1–P6), showing whether each
+    is backed by the compiled C extension or a pure-Python fallback.
+    Intended to be printed to ``stdout`` at the start of a scan so the
+    user can easily compare performance between C and Python runs.
+
+    Example output (C available)::
+
+        C acceleration: ENABLED
+          [✓] P1  parse_dt_fast             ISO 8601 → Unix µs timestamp
+          [✓] P2  compute_file_id_fast      XXH3 128-bit file hash
+          ...
+
+    Example output (C unavailable)::
+
+        C acceleration: DISABLED (gcc or libxxhash not found)
+          [✗] P1  parse_dt_fast             ISO 8601 → Unix µs timestamp
+          ...
+    """
+    if _C_AVAILABLE:
+        header = "C acceleration: ENABLED"
+        mark = "✓"
+    else:
+        header = "C acceleration: DISABLED (gcc or libxxhash not found — Python fallback)"
+        mark = "✗"
+
+    lines = [header]
+    for priority, description in _HOTSPOT_DESCRIPTIONS.items():
+        lines.append(f"  [{mark}] {priority}  {description}")
+
+    return "\n".join(lines)
