@@ -251,6 +251,11 @@ def test_extract_video_frame_uses_yuv_format_for_jpeg(monkeypatch: pytest.Monkey
     assert "-hwaccel" in command
     assert "auto" in command
 
+    # -noautorotate must be present and must appear before -i so that ffmpeg
+    # returns the raw coded frame rather than auto-applying rotation.
+    assert "-noautorotate" in command
+    assert command.index("-noautorotate") < command.index("-i")
+
     # Check for pipe output
     assert "pipe:1" in command
 
@@ -286,6 +291,10 @@ def test_extract_video_frame_uses_rgba_for_png(monkeypatch: pytest.MonkeyPatch, 
     assert "-hwaccel" in command
     assert "auto" in command
 
+    # -noautorotate must be present and must appear before -i.
+    assert "-noautorotate" in command
+    assert command.index("-noautorotate") < command.index("-i")
+
     # Check for pipe output
     assert "pipe:1" in command
 
@@ -315,6 +324,9 @@ def test_extract_video_frame_without_scale_enforces_even_dimensions(monkeypatch:
     assert data == b"jpeg"
     assert "cmd" in captured
     command = captured["cmd"]
+    # -noautorotate must be present and must appear before -i.
+    assert "-noautorotate" in command
+    assert command.index("-noautorotate") < command.index("-i")
     assert "-vf" in command
     vf_index = command.index("-vf")
     vf_expression = command[vf_index + 1]

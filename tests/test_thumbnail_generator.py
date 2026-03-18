@@ -112,11 +112,12 @@ class TestGenerateVideoThumbnail:
         mock_ffmpeg.assert_called_once_with(video, at=0.0, scale=(64, 36), format="jpeg")
 
     def test_returns_none_when_pyav_raises_unexpectedly(self, tmp_path: Path) -> None:
-        """When PyAV unexpectedly raises, the outer exception handler catches it and returns None.
+        """When PyAV unexpectedly raises, the _generate_video_thumbnail exception handler catches it.
 
         Note: In practice extract_frame_with_pyav catches all its own exceptions
-        and returns None, so the outer handler is only a safety net. This test
-        verifies that an unexpected raise does not propagate to the caller.
+        and returns None, so the outer handler in _generate_video_thumbnail is only
+        a safety net. This test verifies that an unexpected raise does not propagate
+        to the caller.
         """
         video = tmp_path / "clip.mp4"
         video.touch()
@@ -265,7 +266,7 @@ class TestVideoThumbnailRotation:
 
         # The ffmpeg subprocess returns the raw coded frame: 60 wide × 100 tall
         # (a portrait video stored without rotation applied).  probe_video_rotation
-        # reports (90, 60, 100): "rotate 90° CW; raw coded dimensions are 60×100".
+        # reports (90, 60, 100): "rotate 90° CW; raw coded dimensions are 60 wide × 100 tall".
         buf = io.BytesIO()
         Image.new("RGB", (60, 100)).save(buf, format="JPEG")
         jpeg_bytes = buf.getvalue()

@@ -185,8 +185,17 @@ def _extract_with_ffmpeg(
     ]
     if at is not None:
         command += ["-ss", f"{max(at, 0):.3f}"]
+    # Disable ffmpeg's built-in autorotate so the raw coded frame is
+    # returned on all platforms.  Modern Linux ffmpeg applies the Display
+    # Matrix rotation automatically (-autorotate is ON by default), which
+    # would double-rotate the frame when combined with our own
+    # _apply_video_rotation() call in thumbnail_generator.  Windows ffmpeg
+    # builds typically ship with autorotate disabled, so suppressing it
+    # here makes the behaviour consistent across platforms.
+    # -noautorotate is an input option and therefore must appear before -i.
     # Security: Ensure absolute path to prevent argument injection if filename starts with '-'
     command += [
+        "-noautorotate",
         "-i",
         str(source.absolute()),
         "-an",
