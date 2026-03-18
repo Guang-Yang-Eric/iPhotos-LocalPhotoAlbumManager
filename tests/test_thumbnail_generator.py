@@ -45,30 +45,36 @@ class TestApplyVideoRotation:
 
 
 class TestGenerateVideoThumbnail:
-    def test_uses_shared_oriented_extractor(self, tmp_path: Path) -> None:
+    def test_zero_rotation_uses_pyav_hook_and_copies_image(self, tmp_path: Path) -> None:
         video = tmp_path / "clip.mp4"
         video.touch()
         expected = _make_pil_image(64, 36)
 
-        with patch.object(
-            tg_module,
-            "extract_oriented_video_frame",
-            return_value=expected,
-        ) as mock_extract:
+        with (
+            patch.object(tg_module, "probe_video_rotation", return_value=(0, 0, 0)),
+            patch.object(tg_module, "extract_frame_with_pyav", return_value=expected) as mock_pyav,
+            patch.object(tg_module, "_extract_video_frame_with_fallbacks") as mock_fallback,
+        ):
             gen = PillowThumbnailGenerator()
             result = gen._generate_video_thumbnail(video, (64, 36))
 
-        assert result is expected
-        mock_extract.assert_called_once_with(video, at=0.0, scale=(64, 36))
+        assert result is not None
+        assert result.size == (64, 36)
+        assert result is not expected
+        mock_pyav.assert_called_once_with(video, at=0.0, scale=(64, 36))
+        mock_fallback.assert_not_called()
 
     def test_returns_none_when_shared_extractor_raises(self, tmp_path: Path) -> None:
         video = tmp_path / "clip.mp4"
         video.touch()
 
-        with patch.object(
-            tg_module,
-            "extract_oriented_video_frame",
-            side_effect=RuntimeError("boom"),
+        with (
+            patch.object(tg_module, "probe_video_rotation", return_value=(90, 100, 60)),
+            patch.object(
+                tg_module,
+                "extract_oriented_video_frame",
+                side_effect=RuntimeError("boom"),
+            ),
         ):
             gen = PillowThumbnailGenerator()
             result = gen._generate_video_thumbnail(video, (64, 36))
@@ -88,16 +94,19 @@ class TestGenerateVideoThumbnail:
         assert result is None
         mock_extract.assert_not_called()
 
-    def test_generate_routes_video_to_shared_extractor(self, tmp_path: Path) -> None:
+    def test_generate_routes_rotated_video_to_shared_extractor(self, tmp_path: Path) -> None:
         video = tmp_path / "video.mov"
         video.touch()
         expected = _make_pil_image(128, 72)
 
-        with patch.object(
-            tg_module,
-            "extract_oriented_video_frame",
-            return_value=expected,
-        ) as mock_extract:
+        with (
+            patch.object(tg_module, "probe_video_rotation", return_value=(90, 128, 72)),
+            patch.object(
+                tg_module,
+                "extract_oriented_video_frame",
+                return_value=expected,
+            ) as mock_extract,
+        ):
             gen = PillowThumbnailGenerator()
             result = gen.generate(video, (128, 72))
 

@@ -1,12 +1,19 @@
 from pathlib import Path
 from typing import Optional, Tuple
 import logging
+import io
 
 from PIL import Image, ImageOps
 
 from iPhoto.application.interfaces import IThumbnailGenerator
 from iPhoto.core.raw_processor import is_raw_extension, load_raw_to_pil
-from iPhoto.utils.ffmpeg import apply_video_rotation, extract_oriented_video_frame
+from iPhoto.utils.ffmpeg import (
+    apply_video_rotation,
+    extract_frame_with_pyav,
+    extract_oriented_video_frame,
+    extract_video_frame,
+    probe_video_rotation,
+)
 from iPhoto.utils.image_loader import generate_micro_thumbnail
 
 LOGGER = logging.getLogger(__name__)
@@ -14,6 +21,29 @@ LOGGER = logging.getLogger(__name__)
 
 # Backward-compatible alias for existing tests and integrations.
 _apply_video_rotation = apply_video_rotation
+
+
+def _extract_video_frame_with_fallbacks(
+    source: Path,
+    *,
+    at: float,
+    scale: tuple[int, int],
+    format: str,
+    allow_pyav: bool,
+) -> bytes:
+    """Compatibility shim kept for legacy thumbnail tests.
+
+    Historically this helper exposed the bytes-producing fallback path from the
+    thumbnail generator module. The current implementation delegates to the
+    shared ffmpeg helper while preserving the old injection point.
+    """
+
+    return extract_video_frame(
+        source,
+        at=at,
+        scale=scale,
+        format=format,
+    )
 
 
 class PillowThumbnailGenerator(IThumbnailGenerator):
@@ -84,6 +114,24 @@ class PillowThumbnailGenerator(IThumbnailGenerator):
         try:
             if not path.exists():
                 return None
+            rotation_cw, _, _ = probe_video_rotation(path)
+            if rotation_cw == 0:
+                image = extract_frame_with_pyav(path, at=0.0, scale=size)
+                if image is not None:
+                    return image.copy()
+                data = _extract_video_frame_with_fallbacks(
+                    path,
+                    at=0.0,
+                    scale=size,
+                    format="jpeg",
+                    allow_pyav=False,
+                )
+                if not data:
+                    return None
+                with io.BytesIO(data) as bio:
+                    with Image.open(bio) as image:
+                        image.load()
+                        return image.copy()
             return extract_oriented_video_frame(path, at=0.0, scale=size)
         except Exception as exc:
             LOGGER.warning(f"Failed to extract frame from {path}: {exc}")
