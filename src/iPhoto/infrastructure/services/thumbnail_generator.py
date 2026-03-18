@@ -78,11 +78,9 @@ class PillowThumbnailGenerator(IThumbnailGenerator):
         try:
             if not path.exists():
                 return None
-            # Prefer PyAV for in-process extraction — avoids subprocess spawn overhead
-            try:
-                img = extract_frame_with_pyav(path, at=0.0, scale=size)
-            except Exception:
-                img = None
+            # Prefer PyAV for in-process extraction — avoids subprocess spawn overhead.
+            # extract_frame_with_pyav handles all its own exceptions and returns None on failure.
+            img = extract_frame_with_pyav(path, at=0.0, scale=size)
             if img is not None:
                 return img
             # Fall back to ffmpeg subprocess when PyAV is unavailable or fails
