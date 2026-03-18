@@ -16,7 +16,7 @@ from PySide6.QtCore import QSize
 from PySide6.QtTest import QSignalSpy
 from PySide6.QtWidgets import QApplication
 
-from iPhoto.config import WORK_DIR_NAME
+from iPhoto.config import VIDEO_THUMBNAIL_CACHE_VERSION, WORK_DIR_NAME
 from iPhoto.gui.ui.tasks.thumbnail_loader import ThumbnailLoader, generate_cache_path, safe_unlink
 from iPhoto.io.sidecar import save_adjustments
 
@@ -220,6 +220,30 @@ def test_generate_cache_path_hash_algorithm(tmp_path: Path) -> None:
     # Verify the filename starts with the expected hash
     filename = result.name
     assert filename.startswith(expected_hash)
+
+
+def test_generate_cache_path_adds_video_version_only_for_video_entries(
+    tmp_path: Path,
+) -> None:
+    """Video thumbnail cache paths should carry the version salt in the filename."""
+
+    album_root = tmp_path / "album"
+    abs_path = album_root / "videos" / "clip.mp4"
+    size = QSize(512, 512)
+    stamp = 1234567890
+
+    image_result = generate_cache_path(album_root, abs_path, size, stamp)
+    video_result = generate_cache_path(
+        album_root,
+        abs_path,
+        size,
+        stamp,
+        is_video=True,
+    )
+
+    assert VIDEO_THUMBNAIL_CACHE_VERSION not in image_result.name
+    assert VIDEO_THUMBNAIL_CACHE_VERSION in video_result.name
+    assert video_result != image_result
 
 
 @pytest.fixture(scope="module")

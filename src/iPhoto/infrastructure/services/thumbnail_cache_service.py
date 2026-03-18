@@ -5,12 +5,15 @@ import numpy as np
 from PySide6.QtCore import QObject, QSize, Signal, QThreadPool, QRunnable, Qt
 from PySide6.QtGui import QImage, QPainter, QPixmap, QTransform
 
+from iPhoto.config import VIDEO_THUMBNAIL_CACHE_VERSION
 from iPhoto.infrastructure.services.thumbnail_generator import PillowThumbnailGenerator
 from iPhoto.core.color_resolver import compute_color_statistics
 from iPhoto.core.image_filters import apply_adjustments
 from iPhoto.gui.ui.tasks import geo_utils
 from iPhoto.io import sidecar
 from iPhoto.utils import image_loader
+
+_VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v"}
 
 class ThumbnailWorkerSignals(QObject):
     """Signals emitted by thumbnail generation workers."""
@@ -159,8 +162,14 @@ class ThumbnailCacheService(QObject):
     def _cache_key(self, path: Path, size: QSize) -> str:
         # Simple hash of path + size
         import hashlib
-        s = f"{path.as_posix()}_{size.width()}x{size.height()}"
-        return hashlib.md5(s.encode('utf-8')).hexdigest()
+
+        version_prefix = (
+            f"{VIDEO_THUMBNAIL_CACHE_VERSION}|"
+            if path.suffix.lower() in _VIDEO_EXTS
+            else ""
+        )
+        s = f"{version_prefix}{path.as_posix()}_{size.width()}x{size.height()}"
+        return hashlib.md5(s.encode("utf-8")).hexdigest()
 
     def _add_to_memory(self, key: str, pixmap: QPixmap):
         if len(self._memory_cache) > self._max_memory_items:
@@ -172,8 +181,7 @@ class ThumbnailCacheService(QObject):
         if size.isEmpty() or not size.isValid():
             return None
 
-        video_exts = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v"}
-        is_video = path.suffix.lower() in video_exts
+        is_video = path.suffix.lower() in _VIDEO_EXTS
         qimage: Optional[QImage] = None
         if not is_video:
             qimage = image_loader.load_qimage(path, size)

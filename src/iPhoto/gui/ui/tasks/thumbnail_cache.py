@@ -10,7 +10,7 @@ from pathlib import Path
 from PySide6.QtCore import QSize
 from PySide6.QtGui import QImage
 
-from ....config import WORK_DIR_NAME
+from ....config import VIDEO_THUMBNAIL_CACHE_VERSION, WORK_DIR_NAME
 
 
 LOGGER = logging.getLogger(__name__)
@@ -47,7 +47,14 @@ def stat_mtime_ns(stat_result: os.stat_result) -> int:
     return int(stamp)
 
 
-def generate_cache_path(library_root: Path, abs_path: Path, size: QSize, stamp: int) -> Path:
+def generate_cache_path(
+    library_root: Path,
+    abs_path: Path,
+    size: QSize,
+    stamp: int,
+    *,
+    is_video: bool = False,
+) -> Path:
     """
     Generate the file path for a cached thumbnail image.
 
@@ -56,6 +63,7 @@ def generate_cache_path(library_root: Path, abs_path: Path, size: QSize, stamp: 
         abs_path (Path): The absolute path of the media file.
         size (QSize): The desired size of the thumbnail.
         stamp (int): A timestamp or version identifier for cache invalidation.
+        is_video (bool): Whether this cache entry stores a video thumbnail.
 
     Returns:
         Path: The path to the cache file for the thumbnail image.
@@ -63,7 +71,10 @@ def generate_cache_path(library_root: Path, abs_path: Path, size: QSize, stamp: 
     # Use absolute path for global uniqueness
     path_str = str(abs_path.resolve())
     digest = hashlib.blake2b(path_str.encode("utf-8"), digest_size=20).hexdigest()
-    filename = f"{digest}_{stamp}_{size.width()}x{size.height()}.png"
+    version_prefix = f"{VIDEO_THUMBNAIL_CACHE_VERSION}_" if is_video else ""
+    filename = (
+        f"{digest}_{version_prefix}{stamp}_{size.width()}x{size.height()}.png"
+    )
     return library_root / WORK_DIR_NAME / "thumbs" / filename
 
 

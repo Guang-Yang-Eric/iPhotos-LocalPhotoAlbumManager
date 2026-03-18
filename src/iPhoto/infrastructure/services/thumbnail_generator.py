@@ -1,116 +1,90 @@
 from pathlib import Path
 from typing import Optional, Tuple
-from PIL import Image, ImageOps
 import logging
-import io
+
+from PIL import Image, ImageOps
 
 from iPhoto.application.interfaces import IThumbnailGenerator
-from iPhoto.utils.image_loader import generate_micro_thumbnail
-from iPhoto.utils.ffmpeg import extract_frame_with_pyav, extract_video_frame, probe_video_rotation
 from iPhoto.core.raw_processor import is_raw_extension, load_raw_to_pil
+from iPhoto.utils.ffmpeg import apply_video_rotation, extract_oriented_video_frame
+from iPhoto.utils.image_loader import generate_micro_thumbnail
 
 LOGGER = logging.getLogger(__name__)
 
 
-def _apply_video_rotation(img: Image.Image, rotation_cw: int) -> Image.Image:
-    """Return *img* rotated clockwise by *rotation_cw* degrees.
+# Backward-compatible alias for existing tests and integrations.
+_apply_video_rotation = apply_video_rotation
 
-    Only multiples of 90 are handled; any other value returns the image
-    unchanged.  :meth:`~PIL.Image.Image.transpose` is used for the three
-    meaningful cases (90 / 180 / 270) because it performs an exact
-    lossless pixel rearrangement without any resampling artefacts.
-    """
-    rotation_cw = rotation_cw % 360
-    if rotation_cw == 90:
-        return img.transpose(Image.Transpose.ROTATE_270)
-    if rotation_cw == 180:
-        return img.transpose(Image.Transpose.ROTATE_180)
-    if rotation_cw == 270:
-        return img.transpose(Image.Transpose.ROTATE_90)
-    return img
 
 class PillowThumbnailGenerator(IThumbnailGenerator):
-    """
-    Generates thumbnails using Pillow for images and FFmpeg for videos.
-    """
+    """Generate thumbnails using Pillow for images and ffmpeg for videos."""
 
     def generate_micro_thumbnail(self, path: Path) -> Optional[str]:
-        # Reuse existing utility
         if not path.exists():
             return None
         return generate_micro_thumbnail(path)
 
     def generate(self, path: Path, size: Tuple[int, int]) -> Optional[Image.Image]:
-        """
-        Generate a thumbnail for the given path at the specified size (width, height).
-        Returns a PIL Image object or None on failure.
-        """
+        """Generate a thumbnail for *path* constrained to *size*."""
+
         try:
             if not path.exists():
                 return None
-            # Determine if video based on extension
-            video_exts = {'.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v'}
+
+            video_exts = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v"}
             if path.suffix.lower() in video_exts:
                 return self._generate_video_thumbnail(path, size)
 
-            # RAW camera files require rawpy for decoding.
             if is_raw_extension(path.suffix):
                 return self._generate_raw_thumbnail(path, size)
 
-            # Default to Image
             return self._generate_image_thumbnail(path, size)
-
-        except Exception as e:
-            LOGGER.warning(f"Failed to generate thumbnail for {path}: {e}")
+        except Exception as exc:
+            LOGGER.warning(f"Failed to generate thumbnail for {path}: {exc}")
             return None
 
-    def _generate_image_thumbnail(self, path: Path, size: Tuple[int, int]) -> Optional[Image.Image]:
+    def _generate_image_thumbnail(
+        self,
+        path: Path,
+        size: Tuple[int, int],
+    ) -> Optional[Image.Image]:
         try:
             with Image.open(path) as img:
                 if img.mode != "RGB":
                     img = img.convert("RGB")
-
-                # Apply EXIF orientation
                 img = ImageOps.exif_transpose(img)
-
-                # Create thumbnail using LANCZOS for quality
                 img.thumbnail(size, Image.Resampling.LANCZOS)
                 return img.copy()
-        except Exception as e:
-            LOGGER.warning(f"Pillow failed to open {path}: {e}")
+        except Exception as exc:
+            LOGGER.warning(f"Pillow failed to open {path}: {exc}")
             return None
 
-    def _generate_raw_thumbnail(self, path: Path, size: Tuple[int, int]) -> Optional[Image.Image]:
+    def _generate_raw_thumbnail(
+        self,
+        path: Path,
+        size: Tuple[int, int],
+    ) -> Optional[Image.Image]:
         """Generate a thumbnail from a RAW camera file using rawpy."""
+
         try:
             pil_img = load_raw_to_pil(path, half_size=True, target_size=size)
             if pil_img is None:
                 return None
             pil_img.thumbnail(size, Image.Resampling.LANCZOS)
             return pil_img
-        except Exception as e:
-            LOGGER.warning(f"rawpy failed to generate thumbnail for {path}: {e}")
+        except Exception as exc:
+            LOGGER.warning(f"rawpy failed to generate thumbnail for {path}: {exc}")
             return None
 
-    def _generate_video_thumbnail(self, path: Path, size: Tuple[int, int]) -> Optional[Image.Image]:
+    def _generate_video_thumbnail(
+        self,
+        path: Path,
+        size: Tuple[int, int],
+    ) -> Optional[Image.Image]:
         try:
             if not path.exists():
                 return None
-            # Read Display Matrix rotation so the thumbnail is correctly oriented.
-            rotation_cw, _, _ = probe_video_rotation(path)
-            # Prefer PyAV for in-process extraction — avoids subprocess spawn overhead.
-            # extract_frame_with_pyav handles all its own exceptions and returns None on failure.
-            img = extract_frame_with_pyav(path, at=0.0, scale=size)
-            if img is not None:
-                return _apply_video_rotation(img, rotation_cw)
-            # Fall back to ffmpeg subprocess when PyAV is unavailable or fails
-            data = extract_video_frame(path, at=0.0, scale=size, format="jpeg")
-            if data:
-                with io.BytesIO(data) as bio:
-                    img = Image.open(bio)
-                    img.load()
-                    return _apply_video_rotation(img.copy(), rotation_cw)
-        except Exception as e:
-            LOGGER.warning(f"Failed to extract frame from {path}: {e}")
+            return extract_oriented_video_frame(path, at=0.0, scale=size)
+        except Exception as exc:
+            LOGGER.warning(f"Failed to extract frame from {path}: {exc}")
             return None
-        return None

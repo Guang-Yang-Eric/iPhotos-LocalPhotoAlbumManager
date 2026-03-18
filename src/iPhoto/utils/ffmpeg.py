@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from io import BytesIO
 import json
 import os
 import subprocess
@@ -127,12 +128,66 @@ def extract_frame_with_pyav(
         return None
 
 
+def apply_video_rotation(
+    image: "Image.Image",
+    rotation_cw: int,
+) -> "Image.Image":
+    """Return *image* rotated clockwise by *rotation_cw* degrees.
+
+    Only exact 90-degree steps are handled. Any other value returns the
+    original image unchanged.
+    """
+
+    from PIL import Image
+
+    rotation_cw = rotation_cw % 360
+    if rotation_cw == 90:
+        return image.transpose(Image.Transpose.ROTATE_270)
+    if rotation_cw == 180:
+        return image.transpose(Image.Transpose.ROTATE_180)
+    if rotation_cw == 270:
+        return image.transpose(Image.Transpose.ROTATE_90)
+    return image
+
+
+def _decode_image_bytes(data: bytes) -> Optional["Image.Image"]:
+    """Decode JPEG/PNG *data* into a standalone PIL image."""
+
+    if not data:
+        return None
+
+    from PIL import Image
+
+    try:
+        with BytesIO(data) as bio:
+            with Image.open(bio) as image:
+                image.load()
+                return image.copy()
+    except Exception:
+        return None
+
+
+def _oriented_extract_scale(
+    scale: Optional[tuple[int, int]],
+    rotation_cw: int,
+) -> Optional[tuple[int, int]]:
+    """Return the raw-frame scale needed to reach *scale* after rotation."""
+
+    if scale is None or rotation_cw % 360 not in (90, 270):
+        return scale
+    width, height = scale
+    if width <= 0 or height <= 0:
+        return scale
+    return (height, width)
+
+
 def extract_video_frame(
     source: Path,
     *,
     at: Optional[float] = None,
     scale: Optional[tuple[int, int]] = None,
     format: str = "jpeg",
+    allow_opencv_fallback: bool = True,
 ) -> bytes:
     """Return a still frame extracted from *source*.
 
@@ -149,6 +204,10 @@ def extract_video_frame(
         Output image format. ``"jpeg"`` is used by default because Qt decoders
         handle it more reliably on Windows. ``"png"`` remains available for
         callers that prefer lossless output.
+    allow_opencv_fallback:
+        Internal escape hatch for callers that require ffmpeg's deterministic
+        ``-noautorotate`` behaviour and therefore must not fall back to
+        OpenCV's platform-dependent decoding path.
     """
 
     fmt = format.lower()
@@ -158,10 +217,60 @@ def extract_video_frame(
     try:
         return _extract_with_ffmpeg(source, at=at, scale=scale, format=fmt)
     except ExternalToolError as exc:
-        fallback = _extract_with_opencv(source, at=at, scale=scale, format=fmt)
-        if fallback is not None:
-            return fallback
+        if allow_opencv_fallback:
+            fallback = _extract_with_opencv(source, at=at, scale=scale, format=fmt)
+            if fallback is not None:
+                return fallback
         raise exc
+
+
+def extract_oriented_video_frame(
+    source: Path,
+    *,
+    at: Optional[float] = None,
+    scale: Optional[tuple[int, int]] = None,
+) -> Optional["Image.Image"]:
+    """Return a PIL frame oriented like the detail-page video renderer.
+
+    The display-matrix rotation from ``ffprobe`` is treated as the single
+    source of truth. Rotated videos bypass PyAV/OpenCV fallbacks so thumbnail
+    generation always starts from an ffmpeg ``-noautorotate`` raw frame and
+    applies the container rotation exactly once in Python.
+    """
+
+    rotation_cw, _, _ = probe_video_rotation(source)
+    extract_scale = _oriented_extract_scale(scale, rotation_cw)
+
+    if rotation_cw == 0:
+        image = extract_frame_with_pyav(source, at=at, scale=scale)
+        if image is not None:
+            return image
+        try:
+            data = extract_video_frame(
+                source,
+                at=at,
+                scale=scale,
+                format="jpeg",
+            )
+        except ExternalToolError:
+            return None
+        return _decode_image_bytes(data)
+
+    try:
+        data = extract_video_frame(
+            source,
+            at=at,
+            scale=extract_scale,
+            format="jpeg",
+            allow_opencv_fallback=False,
+        )
+    except ExternalToolError:
+        return None
+
+    image = _decode_image_bytes(data)
+    if image is None:
+        return None
+    return apply_video_rotation(image, rotation_cw)
 
 
 def _extract_with_ffmpeg(
@@ -189,7 +298,7 @@ def _extract_with_ffmpeg(
     # returned on all platforms.  Modern Linux ffmpeg applies the Display
     # Matrix rotation automatically (-autorotate is ON by default), which
     # would double-rotate the frame when combined with our own
-    # _apply_video_rotation() call in thumbnail_generator.  Windows ffmpeg
+    # apply_video_rotation() step in the thumbnail pipeline. Windows ffmpeg
     # builds typically ship with autorotate disabled, so suppressing it
     # here makes the behaviour consistent across platforms.
     # -noautorotate is an input option and therefore must appear before -i.

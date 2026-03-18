@@ -115,11 +115,23 @@ class ThumbnailJob(QRunnable):
                 return
             else:
                 # Stale cache detected. Remove old file.
-                old_path = generate_cache_path(self._library_root, self._abs_path, self._size, self._known_stamp)
+                old_path = generate_cache_path(
+                    self._library_root,
+                    self._abs_path,
+                    self._size,
+                    self._known_stamp,
+                    is_video=self._is_video,
+                )
                 safe_unlink(old_path)
 
         # 3. Calculate Cache Path
-        cache_path = generate_cache_path(self._library_root, self._abs_path, self._size, actual_stamp)
+        cache_path = generate_cache_path(
+            self._library_root,
+            self._abs_path,
+            self._size,
+            actual_stamp,
+            is_video=self._is_video,
+        )
 
         image: Optional[QImage] = None
         loaded_from_cache = False

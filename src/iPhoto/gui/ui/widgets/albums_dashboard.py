@@ -439,7 +439,13 @@ class DashboardThumbnailLoader(QObject):
         stamp = stat_mtime_ns(stat)
 
         # Use standardized generator with absolute path
-        cache_path = generate_cache_path(effective_library_root, image_path, size, stamp)
+        cache_path = generate_cache_path(
+            effective_library_root,
+            image_path,
+            size,
+            stamp,
+            is_video=is_video,
+        )
 
         if cache_path.exists():
             pixmap = QPixmap(str(cache_path))

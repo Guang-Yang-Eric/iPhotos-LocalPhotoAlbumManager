@@ -32,6 +32,7 @@ LOCK_EXPIRE_SEC: Final[int] = 30
 THUMB_SIZES: Final[list[tuple[int, int]]] = [(256, 256), (512, 512)]
 
 THUMBNAIL_SEEK_GUARD_SEC: Final[float] = 0.35
+VIDEO_THUMBNAIL_CACHE_VERSION: Final[str] = "video-v2"
 
 SCHEMA_DIR: Final[Path] = Path(__file__).resolve().parent / "schemas"
 ALBUM_MANIFEST_NAMES: Final[list[str]] = [".iphoto.album.json", ".iPhoto/manifest.json"]

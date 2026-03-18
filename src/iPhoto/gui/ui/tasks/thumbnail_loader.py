@@ -466,7 +466,13 @@ class ThumbnailLoader(QObject):
         retry_rel = stored_rel if stored_rel is not None else rel
         if known_stamp is not None:
             try:
-                cache_path = generate_cache_path(library_root, abs_path, size, known_stamp)
+                cache_path = generate_cache_path(
+                    library_root,
+                    abs_path,
+                    size,
+                    known_stamp,
+                    is_video=is_video,
+                )
                 safe_unlink(cache_path)
             except OSError:
                 LOGGER.debug("Failed to cleanup cache for %s", abs_path, exc_info=True)

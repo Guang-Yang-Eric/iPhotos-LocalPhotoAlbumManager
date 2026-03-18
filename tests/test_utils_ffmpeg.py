@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import io
 from pathlib import Path
 import subprocess
 
 import pytest
+from PIL import Image
 
 from iPhoto.utils import ffmpeg
 from iPhoto.errors import ExternalToolError
@@ -370,6 +372,156 @@ def test_extract_video_frame_propagates_error_when_no_fallback(monkeypatch: pyte
 
     with pytest.raises(ExternalToolError):
         ffmpeg.extract_video_frame(input_path, format="jpeg")
+
+
+def test_extract_video_frame_can_disable_opencv_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Rotation-sensitive callers can require ffmpeg-only extraction."""
+
+    input_path = tmp_path / "clip.mov"
+    input_path.touch()
+
+    def fake_ffmpeg(*args: object, **kwargs: object) -> bytes:
+        raise ExternalToolError("missing tool")
+
+    monkeypatch.setattr(ffmpeg, "_extract_with_ffmpeg", fake_ffmpeg)
+    monkeypatch.setattr(
+        ffmpeg,
+        "_extract_with_opencv",
+        lambda *args, **kwargs: b"opencv",
+    )
+
+    with pytest.raises(ExternalToolError):
+        ffmpeg.extract_video_frame(
+            input_path,
+            format="jpeg",
+            allow_opencv_fallback=False,
+        )
+
+
+def test_extract_oriented_video_frame_prefers_pyav_when_rotation_zero(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Unrotated videos keep the existing PyAV-first path."""
+
+    input_path = tmp_path / "clip.mov"
+    input_path.touch()
+    expected = Image.new("RGB", (64, 36), color="purple")
+
+    monkeypatch.setattr(ffmpeg, "probe_video_rotation", lambda *_: (0, 1920, 1080))
+    monkeypatch.setattr(ffmpeg, "extract_frame_with_pyav", lambda *args, **kwargs: expected)
+    monkeypatch.setattr(
+        ffmpeg,
+        "extract_video_frame",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("ffmpeg fallback should not run when PyAV succeeds")
+        ),
+    )
+
+    result = ffmpeg.extract_oriented_video_frame(input_path, at=0.0, scale=(96, 96))
+
+    assert result is expected
+
+
+def test_extract_oriented_video_frame_falls_back_to_bytes_when_rotation_zero(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Unrotated videos still fall back to the existing bytes path."""
+
+    input_path = tmp_path / "clip.mov"
+    input_path.touch()
+    expected = Image.new("RGB", (80, 45), color="green")
+    buffer = io.BytesIO()
+    expected.save(buffer, format="JPEG")
+
+    calls: list[tuple[Path, float, tuple[int, int], str, bool]] = []
+
+    def fake_extract(
+        source: Path,
+        *,
+        at: float,
+        scale: tuple[int, int],
+        format: str,
+        allow_opencv_fallback: bool = True,
+    ) -> bytes:
+        calls.append((source, at, scale, format, allow_opencv_fallback))
+        return buffer.getvalue()
+
+    monkeypatch.setattr(ffmpeg, "probe_video_rotation", lambda *_: (0, 1920, 1080))
+    monkeypatch.setattr(ffmpeg, "extract_frame_with_pyav", lambda *args, **kwargs: None)
+    monkeypatch.setattr(ffmpeg, "extract_video_frame", fake_extract)
+
+    result = ffmpeg.extract_oriented_video_frame(input_path, at=0.0, scale=(96, 96))
+
+    assert result is not None
+    assert result.size == (80, 45)
+    assert calls == [(input_path, 0.0, (96, 96), "jpeg", True)]
+
+
+def test_extract_oriented_video_frame_rotated_video_uses_ffmpeg_only(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Rotated videos bypass PyAV and use ffmpeg-only raw-frame extraction."""
+
+    input_path = tmp_path / "rotated.mov"
+    input_path.touch()
+
+    raw_frame = Image.new("RGB", (60, 100), color="orange")
+    buffer = io.BytesIO()
+    raw_frame.save(buffer, format="JPEG")
+    calls: list[tuple[Path, float, tuple[int, int], str, bool]] = []
+
+    def fake_extract(
+        source: Path,
+        *,
+        at: float,
+        scale: tuple[int, int],
+        format: str,
+        allow_opencv_fallback: bool = True,
+    ) -> bytes:
+        calls.append((source, at, scale, format, allow_opencv_fallback))
+        return buffer.getvalue()
+
+    monkeypatch.setattr(ffmpeg, "probe_video_rotation", lambda *_: (90, 60, 100))
+    monkeypatch.setattr(
+        ffmpeg,
+        "extract_frame_with_pyav",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("PyAV should not run for rotated videos")
+        ),
+    )
+    monkeypatch.setattr(ffmpeg, "extract_video_frame", fake_extract)
+
+    result = ffmpeg.extract_oriented_video_frame(input_path, at=0.0, scale=(100, 60))
+
+    assert result is not None
+    assert result.size == (100, 60)
+    assert calls == [(input_path, 0.0, (60, 100), "jpeg", False)]
+
+
+def test_extract_oriented_video_frame_rotated_video_returns_none_when_ffmpeg_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Rotated videos should not fall back to uncertain decoders after ffmpeg fails."""
+
+    input_path = tmp_path / "rotated.mov"
+    input_path.touch()
+
+    monkeypatch.setattr(ffmpeg, "probe_video_rotation", lambda *_: (180, 1920, 1080))
+    monkeypatch.setattr(ffmpeg, "extract_frame_with_pyav", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        ffmpeg,
+        "extract_video_frame",
+        lambda *args, **kwargs: (_ for _ in ()).throw(ExternalToolError("boom")),
+    )
+
+    assert ffmpeg.extract_oriented_video_frame(input_path, at=0.0, scale=(96, 96)) is None
 
 
 def test_extract_with_opencv_scales_and_encodes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
