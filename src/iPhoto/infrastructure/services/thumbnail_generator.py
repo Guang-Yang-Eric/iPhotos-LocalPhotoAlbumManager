@@ -6,7 +6,7 @@ import io
 
 from iPhoto.application.interfaces import IThumbnailGenerator
 from iPhoto.utils.image_loader import generate_micro_thumbnail
-from iPhoto.utils.ffmpeg import extract_video_frame
+from iPhoto.utils.ffmpeg import extract_frame_with_pyav, extract_video_frame
 from iPhoto.core.raw_processor import is_raw_extension, load_raw_to_pil
 
 LOGGER = logging.getLogger(__name__)
@@ -78,6 +78,14 @@ class PillowThumbnailGenerator(IThumbnailGenerator):
         try:
             if not path.exists():
                 return None
+            # Prefer PyAV for in-process extraction — avoids subprocess spawn overhead
+            try:
+                img = extract_frame_with_pyav(path, at=0.0, scale=size)
+            except Exception:
+                img = None
+            if img is not None:
+                return img
+            # Fall back to ffmpeg subprocess when PyAV is unavailable or fails
             data = extract_video_frame(path, at=0.0, scale=size, format="jpeg")
             if data:
                 with io.BytesIO(data) as bio:
@@ -85,6 +93,6 @@ class PillowThumbnailGenerator(IThumbnailGenerator):
                     img.load()
                     return img.copy()
         except Exception as e:
-            LOGGER.warning(f"FFmpeg failed to extract frame from {path}: {e}")
+            LOGGER.warning(f"Failed to extract frame from {path}: {e}")
             return None
         return None
