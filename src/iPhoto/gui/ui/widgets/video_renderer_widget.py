@@ -310,6 +310,29 @@ class VideoRendererWidget(QRhiWidget):
                     ):
                         pre_rotated = True
 
+            elif container_rot == 180 and raw_w > 0:
+                # 180° rotation: frame dimensions are identical to the raw
+                # coded dimensions, so the dimension-swap heuristic used for
+                # 90°/270° cannot be applied here.
+                #
+                # The Qt 6 multimedia FFmpeg backend on Linux applies the
+                # display-matrix transform (hflip + vflip) to the decoded
+                # pixel data before delivering frames to the application.
+                # After pre-rotating it clears QVideoFrameFormat.rotation()
+                # to Rotation0, signalling that no further rotation is
+                # needed.  When the container reports 180° but the surface
+                # format's rotation() is already 0°, the backend has already
+                # applied the transform and the frame is correctly oriented.
+                try:
+                    qt_rot = fmt.rotation()
+                    qt_rot_val = (
+                        qt_rot.value if hasattr(qt_rot, "value") else int(qt_rot)
+                    )
+                except (TypeError, ValueError):
+                    qt_rot_val = container_rot  # unknown → assume not pre-rotated
+                if qt_rot_val == 0:
+                    pre_rotated = True
+
             rot_deg = 0 if pre_rotated else container_rot
         elif raw_w > 0:
             # ffprobe ran successfully but reported 0° — trust it; do not
@@ -741,15 +764,18 @@ class VideoRendererWidget(QRhiWidget):
         w = img.width()
         h = img.height()
 
-        # On some Qt versions ``toImage()`` applies the frame's rotation
-        # internally, producing an image whose dimensions are the transpose
-        # of the surface format's ``frameWidth``/``frameHeight``.  We always
-        # compare the image size against the surface format, regardless of
-        # the current ``_rotate90_steps`` value.
+        # Qt 6.4+ ``toImage()`` always applies the frame's rotation metadata
+        # internally before returning the image.  We detect and cancel the
+        # duplicate shader rotation based on the resulting image dimensions:
+        #
+        #   • 90°/270°: dimensions are transposed → detect via dimension swap.
+        #   • 180°:     dimensions are unchanged   → detect via _rotate90_steps.
         fmt = frame.surfaceFormat()
         fmt_w = fmt.frameWidth()
         fmt_h = fmt.frameHeight()
         if fmt_w > 0 and fmt_h > 0 and w == fmt_h and h == fmt_w:
+            # 90°/270° pre-rotation detected: dimensions were transposed by
+            # toImage().  Cancel the shader rotation.
             self._rotate90_steps = 0
             self._mirror = 0
             # Update the display native size to match the (now pre-rotated)
@@ -758,6 +784,20 @@ class VideoRendererWidget(QRhiWidget):
             if new_size != self._native_size:
                 self._native_size = new_size
                 self.nativeSizeChanged.emit(new_size)
+        elif (
+            fmt_w > 0
+            and fmt_h > 0
+            and w == fmt_w
+            and h == fmt_h
+            and self._rotate90_steps == 2
+        ):
+            # 180° pre-rotation detected: toImage() applied hflip+vflip
+            # in-place (dimensions unchanged).  Since Qt 6.4+ always applies
+            # non-zero rotation metadata in toImage(), the returned image is
+            # already correctly oriented.  Cancel the shader rotation to
+            # prevent a second 180° flip.
+            self._rotate90_steps = 0
+            self._mirror = 0
 
         if (self._tex_rgba is None or
                 self._tex_rgba.pixelSize().width() != w or

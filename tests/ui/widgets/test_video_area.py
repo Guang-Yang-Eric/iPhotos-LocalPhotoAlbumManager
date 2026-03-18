@@ -189,6 +189,50 @@ class TestVideoRendererWidget:
         # Pre-rotated → no additional rotation
         assert w._rotate90_steps == 0
 
+    def test_180_rotation_not_pre_rotated(self, qapp):
+        """180° container rotation without backend pre-rotation → steps = 2."""
+        from PySide6.QtCore import QSize
+        from PySide6.QtMultimedia import QtVideo
+        w = VideoRendererWidget()
+        w.set_container_rotation(180, 1280, 720)
+
+        # Frame has the same dimensions as the raw stream (not pre-rotated).
+        # Qt's rotation() reports 180° — the backend has NOT pre-rotated.
+        fmt = QVideoFrameFormat(
+            QSize(1280, 720), QVideoFrameFormat.PixelFormat.Format_RGBA8888
+        )
+        fmt.setRotation(QtVideo.Rotation.Clockwise180)
+        frame = QVideoFrame(fmt)
+        w.update_frame(frame)
+
+        # Not pre-rotated → shader must apply 180° (steps = 2)
+        assert w._rotate90_steps == 2
+
+    def test_180_rotation_pre_rotated_by_backend(self, qapp):
+        """180° container rotation with Qt FFmpeg backend pre-rotation → steps = 0.
+
+        On Linux, the Qt FFmpeg multimedia backend pre-rotates 180° video
+        frames internally (hflip + vflip) and then clears
+        QVideoFrameFormat.rotation() to Rotation0 to signal that no further
+        rotation is needed.  The renderer must detect this and skip the
+        shader rotation to avoid a double-rotation.
+        """
+        from PySide6.QtCore import QSize
+        w = VideoRendererWidget()
+        w.set_container_rotation(180, 1280, 720)
+
+        # Frame has the same dimensions as the raw stream (180° doesn't swap
+        # width/height).  Qt's rotation() reports 0° → backend pre-rotated.
+        fmt = QVideoFrameFormat(
+            QSize(1280, 720), QVideoFrameFormat.PixelFormat.Format_RGBA8888
+        )
+        # Rotation0 is the default; explicitly leave it unset (as the backend does).
+        frame = QVideoFrame(fmt)
+        w.update_frame(frame)
+
+        # Backend pre-rotated → shader must NOT apply any rotation (steps = 0)
+        assert w._rotate90_steps == 0
+
     def test_no_fallback_when_no_container_rotation(self, qapp):
         """When container has no rotation, steps stay at 0."""
         w = VideoRendererWidget()
