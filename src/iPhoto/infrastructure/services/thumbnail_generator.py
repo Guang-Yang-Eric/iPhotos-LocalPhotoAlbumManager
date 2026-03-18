@@ -6,10 +6,28 @@ import io
 
 from iPhoto.application.interfaces import IThumbnailGenerator
 from iPhoto.utils.image_loader import generate_micro_thumbnail
-from iPhoto.utils.ffmpeg import extract_frame_with_pyav, extract_video_frame
+from iPhoto.utils.ffmpeg import extract_frame_with_pyav, extract_video_frame, probe_video_rotation
 from iPhoto.core.raw_processor import is_raw_extension, load_raw_to_pil
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _apply_video_rotation(img: Image.Image, rotation_cw: int) -> Image.Image:
+    """Return *img* rotated clockwise by *rotation_cw* degrees.
+
+    Only multiples of 90 are handled; any other value returns the image
+    unchanged.  :meth:`~PIL.Image.Image.transpose` is used for the three
+    meaningful cases (90 / 180 / 270) because it performs an exact
+    lossless pixel rearrangement without any resampling artefacts.
+    """
+    rotation_cw = rotation_cw % 360
+    if rotation_cw == 90:
+        return img.transpose(Image.Transpose.ROTATE_270)
+    if rotation_cw == 180:
+        return img.transpose(Image.Transpose.ROTATE_180)
+    if rotation_cw == 270:
+        return img.transpose(Image.Transpose.ROTATE_90)
+    return img
 
 class PillowThumbnailGenerator(IThumbnailGenerator):
     """
@@ -78,18 +96,20 @@ class PillowThumbnailGenerator(IThumbnailGenerator):
         try:
             if not path.exists():
                 return None
+            # Read Display Matrix rotation so the thumbnail is correctly oriented.
+            rotation_cw, _, _ = probe_video_rotation(path)
             # Prefer PyAV for in-process extraction — avoids subprocess spawn overhead.
             # extract_frame_with_pyav handles all its own exceptions and returns None on failure.
             img = extract_frame_with_pyav(path, at=0.0, scale=size)
             if img is not None:
-                return img
+                return _apply_video_rotation(img, rotation_cw)
             # Fall back to ffmpeg subprocess when PyAV is unavailable or fails
             data = extract_video_frame(path, at=0.0, scale=size, format="jpeg")
             if data:
                 with io.BytesIO(data) as bio:
                     img = Image.open(bio)
                     img.load()
-                    return img.copy()
+                    return _apply_video_rotation(img.copy(), rotation_cw)
         except Exception as e:
             LOGGER.warning(f"Failed to extract frame from {path}: {e}")
             return None
