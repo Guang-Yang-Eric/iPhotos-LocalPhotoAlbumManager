@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from maps.map_sources import MapBackendMetadata
-from maps.tile_backend import FallbackTileBackend, TileBackendUnavailableError
+from maps.tile_backend import FallbackTileBackend, TileBackendUnavailableError, TileRenderError
 
 
 @dataclass
@@ -78,3 +78,35 @@ def test_fallback_backend_disables_primary_after_runtime_unavailable() -> None:
     assert primary.load_calls == 1
     assert fallback.load_calls == 2
     assert backend.probe() == fallback.metadata
+
+
+def test_fallback_backend_keeps_primary_enabled_after_render_error() -> None:
+    """A per-tile TileRenderError must not permanently disable the primary backend.
+
+    OsmAndRasterBackend converts render-phase TileBackendUnavailableErrors into
+    TileRenderErrors so that a slow or stuck helper process does not kill the OBF
+    backend for the entire session.  FallbackTileBackend must keep _primary_enabled
+    True and retry the primary on subsequent tiles.
+    """
+    primary_metadata = MapBackendMetadata(2.0, 18.0, True, "raster")
+    primary = _FakeBackend(
+        metadata=primary_metadata,
+        load_error=TileRenderError("render timed out"),
+    )
+    fallback = _FakeBackend(
+        metadata=MapBackendMetadata(0.0, 6.0, False, "vector"),
+        tile={"legacy": True},
+    )
+
+    backend = FallbackTileBackend(primary, fallback)
+
+    first_tile = backend.load_tile(1, 0, 0)
+    second_tile = backend.load_tile(1, 0, 1)
+
+    assert first_tile == {"legacy": True}
+    assert second_tile == {"legacy": True}
+    # Primary must be tried for BOTH tiles (not permanently disabled after the first error).
+    assert primary.load_calls == 2
+    assert fallback.load_calls == 2
+    # Backend metadata stays as raster because the primary was never permanently disabled.
+    assert backend.probe() == primary_metadata

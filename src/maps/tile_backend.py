@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Optional, Protocol, TypeAlias
@@ -23,6 +24,7 @@ DEFAULT_QT_ROOT = Path(r"C:\Qt\6.10.1\mingw_64")
 DEFAULT_MINGW_ROOT = Path(r"C:\Qt\Tools\mingw1310_64")
 ENV_QT_ROOT = "IPHOTO_OSMAND_QT_ROOT"
 ENV_MINGW_ROOT = "IPHOTO_OSMAND_MINGW_ROOT"
+PROCESS_KILL_TIMEOUT_MS = 1000
 
 
 class TileBackendUnavailableError(TileLoadingError):
@@ -155,7 +157,15 @@ class OsmAndRasterBackend:
             "device_scale": float(self._device_scale),
             "output_path": str(cache_path),
         }
-        response = self._communicate(process, request)
+        try:
+            response = self._communicate(process, request, timeout_ms=30000)
+        except TileBackendUnavailableError as exc:
+            # The helper process may be stuck or in an inconsistent state.
+            # Kill it so _ensure_process() can restart it on the next request,
+            # then raise TileRenderError so this tile falls back without
+            # permanently disabling the OBF backend.
+            self._terminate_process()
+            raise TileRenderError(str(exc)) from exc
         if response.get("status") != "ok":
             message = str(response.get("message", "unknown render failure"))
             raise TileRenderError(message)
@@ -173,12 +183,12 @@ class OsmAndRasterBackend:
             return
 
         try:
-            self._communicate(self._process, {"command": "shutdown"}, timeout_ms=1000)
+            self._communicate(self._process, {"command": "shutdown"}, timeout_ms=PROCESS_KILL_TIMEOUT_MS)
         except TileLoadingError:
             pass
 
         self._process.kill()
-        self._process.waitForFinished(1000)
+        self._process.waitForFinished(PROCESS_KILL_TIMEOUT_MS)
         self._process = None
 
     def set_device_scale(self, scale: float) -> None:
@@ -219,7 +229,7 @@ class OsmAndRasterBackend:
         )
         if response.get("status") != "ok":
             process.kill()
-            process.waitForFinished(1000)
+            process.waitForFinished(PROCESS_KILL_TIMEOUT_MS)
             message = str(response.get("message", "failed to initialise OsmAnd helper"))
             raise TileBackendUnavailableError(message)
 
@@ -237,6 +247,19 @@ class OsmAndRasterBackend:
         self._process = process
         return process
 
+    def _terminate_process(self) -> None:
+        """Kill the helper process and clear the cached reference."""
+
+        if self._process is None:
+            return
+        proc = self._process
+        self._process = None
+        try:
+            proc.kill()
+            proc.waitForFinished(PROCESS_KILL_TIMEOUT_MS)
+        except Exception:
+            pass
+
     def _communicate(
         self,
         process: QProcess,
@@ -249,11 +272,12 @@ class OsmAndRasterBackend:
         if not process.waitForBytesWritten(timeout_ms):
             raise TileBackendUnavailableError("Timed out while writing to the OsmAnd helper")
 
-        if not process.canReadLine() and not process.waitForReadyRead(timeout_ms):
-            raise TileBackendUnavailableError("Timed out while waiting for the OsmAnd helper")
-
+        deadline = time.monotonic() + timeout_ms / 1000.0
         while not process.canReadLine():
-            if not process.waitForReadyRead(timeout_ms):
+            remaining_ms = int((deadline - time.monotonic()) * 1000)
+            if remaining_ms <= 0:
+                raise TileBackendUnavailableError("Timed out while reading from the OsmAnd helper")
+            if not process.waitForReadyRead(remaining_ms):
                 raise TileBackendUnavailableError("Timed out while reading from the OsmAnd helper")
 
         raw_line = bytes(process.readLine()).decode("utf8", errors="replace").strip()
@@ -451,6 +475,7 @@ __all__ = [
     "FallbackTileBackend",
     "LegacyVectorBackend",
     "OsmAndRasterBackend",
+    "PROCESS_KILL_TIMEOUT_MS",
     "RasterTile",
     "TileBackend",
     "TileBackendUnavailableError",
