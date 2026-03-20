@@ -275,7 +275,9 @@ class OsmAndRasterBackend:
         deadline = time.monotonic() + timeout_ms / 1000.0
         while not process.canReadLine():
             remaining_ms = int((deadline - time.monotonic()) * 1000)
-            if remaining_ms <= 0 or not process.waitForReadyRead(remaining_ms):
+            if remaining_ms <= 0:
+                raise TileBackendUnavailableError("Timed out while reading from the OsmAnd helper")
+            if not process.waitForReadyRead(remaining_ms):
                 raise TileBackendUnavailableError("Timed out while reading from the OsmAnd helper")
 
         raw_line = bytes(process.readLine()).decode("utf8", errors="replace").strip()

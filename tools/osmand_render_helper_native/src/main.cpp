@@ -1,6 +1,7 @@
 #include "file_system_core_resources_provider.h"
 
 #include <cmath>
+#include <cstdio>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -9,6 +10,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QHash>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLocale>
@@ -21,11 +23,11 @@
 #include <OsmAndCore.h>
 #include <OsmAndCore/Logging.h>
 #include <OsmAndCore/SimpleQueryController.h>
+#include <OsmAndCore/Map/IMapStyle.h>
 #include <OsmAndCore/Map/MapRasterizer.h>
 #include <OsmAndCore/Map/MapPrimitivesProvider.h>
 #include <OsmAndCore/Map/MapPresentationEnvironment.h>
 #include <OsmAndCore/Map/MapPrimitiviser.h>
-#include <OsmAndCore/Map/MapRasterLayerProvider_Software.h>
 #include <OsmAndCore/Map/ObfMapObjectsProvider.h>
 #include <OsmAndCore/Map/MapStylesCollection.h>
 #include <OsmAndCore/ObfsCollection.h>
@@ -108,16 +110,34 @@ public:
         const auto obfsCollection = std::make_shared<OsmAnd::ObfsCollection>();
         obfsCollection->addFile(obfPath);
 
+        const auto styleName = QFileInfo(stylePath).baseName();
+        const auto resolvedStyle = stylesCollection->getResolvedStyleByName(styleName);
+        if (!resolvedStyle)
+        {
+            OsmAnd::ReleaseCore();
+            errorMessage = QStringLiteral("Unable to resolve rendering style: %1").arg(stylePath);
+            return false;
+        }
+
+        const auto mapObjectsProvider = std::make_shared<OsmAnd::ObfMapObjectsProvider>(
+            obfsCollection,
+            OsmAnd::ObfMapObjectsProvider::Mode::OnlyBinaryMapObjects,
+            1);
+
         _provider = provider;
         _stylesCollection = stylesCollection;
         _obfsCollection = obfsCollection;
         _resourcesRoot = resourcesRoot;
         _stylePath = stylePath;
-        _styleName = QFileInfo(stylePath).baseName();
+        _styleName = styleName;
         _nightMode = nightMode;
         _locale = QLocale::system().name().section(QLatin1Char('_'), 0, 0).toLower();
         if (_locale.isEmpty())
             _locale = QStringLiteral("en");
+
+        _resolvedStyle = resolvedStyle;
+        _mapObjectsProvider = mapObjectsProvider;
+
         _initialized = true;
         return true;
     }
@@ -128,7 +148,7 @@ public:
         int y,
         double deviceScale,
         const QString& outputPath,
-        QString& errorMessage) const
+        QString& errorMessage)
     {
         if (!_initialized)
         {
@@ -145,6 +165,11 @@ public:
             errorMessage = QStringLiteral("output_path can not be empty");
             return false;
         }
+        if (!_resolvedStyle)
+        {
+            errorMessage = QStringLiteral("rendering style is not resolved");
+            return false;
+        }
 
         const auto tileId = OsmAnd::TileId::fromXY(x, y);
         const auto zoomLevel = static_cast<OsmAnd::ZoomLevel>(z);
@@ -154,36 +179,31 @@ public:
 
         QDir().mkpath(QFileInfo(outputPath).absolutePath());
 
-        std::cerr << "render: resolve style" << std::endl;
-        const auto mapStyle = _stylesCollection->getResolvedStyleByName(_styleName);
-        if (!mapStyle)
+        // Rebuild scale-dependent providers only when the device pixel ratio changes.
+        if (!_primitivesProvider || effectiveScale != _cachedDeviceScale)
         {
-            errorMessage = QStringLiteral("Unable to resolve rendering style: %1").arg(_styleName);
-            return false;
+            auto env = std::make_shared<OsmAnd::MapPresentationEnvironment>(
+                _resolvedStyle,
+                static_cast<float>(effectiveScale),
+                1.0f,
+                1.0f);
+            env->setLocaleLanguageId(_locale);
+            env->setSettings(QHash<QString, QString>{
+                {QStringLiteral("nightMode"), _nightMode ? QStringLiteral("true") : QStringLiteral("false")},
+            });
+
+            auto prim = std::make_shared<OsmAnd::MapPrimitiviser>(env);
+            auto primProv = std::make_shared<OsmAnd::MapPrimitivesProvider>(
+                _mapObjectsProvider,
+                prim,
+                rasterSize);
+
+            _mapPresentationEnvironment = std::move(env);
+            _primitiviser = std::move(prim);
+            _primitivesProvider = std::move(primProv);
+            _cachedDeviceScale = effectiveScale;
         }
 
-        std::cerr << "render: presentation env" << std::endl;
-        const auto mapPresentationEnvironment = std::make_shared<OsmAnd::MapPresentationEnvironment>(
-            mapStyle,
-            static_cast<float>(effectiveScale),
-            1.0f,
-            1.0f);
-        mapPresentationEnvironment->setLocaleLanguageId(_locale);
-        mapPresentationEnvironment->setSettings(QHash<QString, QString>{
-            {QStringLiteral("nightMode"), _nightMode ? QStringLiteral("true") : QStringLiteral("false")},
-        });
-
-        std::cerr << "render: primitiviser" << std::endl;
-        const auto primitiviser = std::make_shared<OsmAnd::MapPrimitiviser>(mapPresentationEnvironment);
-        std::cerr << "render: map objects provider" << std::endl;
-        const auto mapObjectsProvider = std::make_shared<OsmAnd::ObfMapObjectsProvider>(_obfsCollection, OsmAnd::ObfMapObjectsProvider::Mode::OnlyBinaryMapObjects, 1);
-        std::cerr << "render: primitives provider" << std::endl;
-        const auto primitivesProvider = std::make_shared<OsmAnd::MapPrimitivesProvider>(
-            mapObjectsProvider,
-            primitiviser,
-            rasterSize);
-
-        std::cerr << "render: build request" << std::endl;
         OsmAnd::MapPrimitivesProvider::Request request;
         request.tileId = tileId;
         request.zoom = zoomLevel;
@@ -192,23 +212,12 @@ public:
         request.areaTime = QDateTime::currentMSecsSinceEpoch();
         request.queryController = std::make_shared<OsmAnd::SimpleQueryController>();
 
-        std::shared_ptr<OsmAnd::IMapObjectsProvider::Data> mapObjectsData;
-        std::cerr << "render: obtain map objects" << std::endl;
-        if (!mapObjectsProvider->obtainTiledMapObjects(request, mapObjectsData))
-        {
-            errorMessage = QStringLiteral("Failed to obtain map objects for tile rendering");
-            return false;
-        }
-        std::cerr << "render: got map objects" << std::endl;
-
         std::shared_ptr<OsmAnd::MapPrimitivesProvider::Data> primitivesData;
-        std::cerr << "render: obtain primitives" << std::endl;
-        if (!primitivesProvider->obtainTiledPrimitives(request, primitivesData))
+        if (!_primitivesProvider->obtainTiledPrimitives(request, primitivesData))
         {
             errorMessage = QStringLiteral("Failed to obtain map primitives for tile rendering");
             return false;
         }
-        std::cerr << "render: got primitives" << std::endl;
 
         SkBitmap bitmap;
         if (!bitmap.tryAllocPixels(SkImageInfo::MakeN32Premul(rasterSize, rasterSize)))
@@ -218,12 +227,11 @@ public:
         }
 
         SkCanvas canvas(bitmap);
-        canvas.clear(mapPresentationEnvironment->getDefaultBackgroundColor(zoomLevel).toSkColor());
+        canvas.clear(_mapPresentationEnvironment->getDefaultBackgroundColor(zoomLevel).toSkColor());
 
         if (primitivesData && primitivesData->primitivisedObjects)
         {
-            std::cerr << "render: rasterize primitives" << std::endl;
-            OsmAnd::MapRasterizer rasterizer(mapPresentationEnvironment);
+            OsmAnd::MapRasterizer rasterizer(_mapPresentationEnvironment);
             rasterizer.rasterize(
                 bbox31,
                 primitivesData->primitivisedObjects,
@@ -232,10 +240,8 @@ public:
                 nullptr,
                 nullptr,
                 request.queryController);
-            std::cerr << "render: rasterized primitives" << std::endl;
         }
 
-        std::cerr << "render: encode image" << std::endl;
         const auto image = bitmap.asImage();
         if (!image)
         {
@@ -270,6 +276,14 @@ public:
 
     void shutdown()
     {
+        _mapPresentationEnvironment.reset();
+        _primitiviser.reset();
+        _primitivesProvider.reset();
+        _cachedDeviceScale = 0.0;
+
+        _mapObjectsProvider.reset();
+        _resolvedStyle.reset();
+
         if (_initialized)
         {
             OsmAnd::ReleaseCore();
@@ -301,6 +315,16 @@ private:
     QString _locale;
     bool _nightMode = false;
     bool _initialized = false;
+
+    // Stable post-init objects; valid for the lifetime of the session.
+    std::shared_ptr<const OsmAnd::IMapStyle> _resolvedStyle;
+    std::shared_ptr<OsmAnd::ObfMapObjectsProvider> _mapObjectsProvider;
+
+    // Scale-dependent objects; rebuilt only when deviceScale changes.
+    std::shared_ptr<OsmAnd::MapPresentationEnvironment> _mapPresentationEnvironment;
+    std::shared_ptr<OsmAnd::MapPrimitiviser> _primitiviser;
+    std::shared_ptr<OsmAnd::MapPrimitivesProvider> _primitivesProvider;
+    double _cachedDeviceScale = 0.0;
 };
 
 QJsonObject handleInitCommand(const QJsonObject& command, OsmAndRenderHelperSession& session)
@@ -322,7 +346,7 @@ QJsonObject handleInitCommand(const QJsonObject& command, OsmAndRenderHelperSess
     return response;
 }
 
-QJsonObject handleRenderCommand(const QJsonObject& command, const OsmAndRenderHelperSession& session)
+QJsonObject handleRenderCommand(const QJsonObject& command, OsmAndRenderHelperSession& session)
 {
     QString errorMessage;
     const auto z = command.value(QStringLiteral("z")).toInt(-1);
@@ -428,6 +452,10 @@ int runOneShotRender(int argc, char** argv)
 
 int main(int argc, char** argv)
 {
+    // Disable stdout buffering so JSON-line responses reach the Python caller
+    // immediately even when stdout is connected to a pipe.
+    std::setvbuf(stdout, nullptr, _IONBF, 0);
+
     OsmAnd::Logger::get()->setSeverityLevelThreshold(static_cast<OsmAnd::LogSeverityLevel>(999));
 
     if (argc > 1)
