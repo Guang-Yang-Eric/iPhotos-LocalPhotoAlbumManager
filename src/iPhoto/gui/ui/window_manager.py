@@ -533,6 +533,33 @@ class FramelessWindowManager(QObject):
         height = max(_MIN_WINDOW_HEIGHT, min(size.height(), max_h))
         return QSize(width, height)
 
+    def _try_start_system_move(self) -> bool:
+        """Delegate window movement to the Wayland compositor when applicable.
+
+        On Wayland, ``QWidget.move()`` has no effect for frameless windows
+        because the protocol gives the compositor exclusive control over window
+        placement.  ``QWindow.startSystemMove()`` asks the compositor to take
+        over the drag from the current pointer position, which works correctly
+        on KDE Plasma, GNOME, and other Wayland compositors.
+
+        Returns ``True`` if ``startSystemMove()`` was initiated (i.e. running
+        on Wayland and the platform supports the call), ``False`` on X11 /
+        macOS / Windows where the manual drag path is used instead.
+
+        This method is intentionally a no-op on non-Wayland sessions so that
+        existing behaviour on macOS and Windows remains unaffected.
+        """
+        app = QApplication.instance()
+        if app is None:
+            return False
+        if app.platformName().lower() != "wayland":
+            return False
+        handle = self._window.windowHandle()
+        if handle is None:
+            return False
+        handle.startSystemMove()
+        return True
+
     def _handle_title_bar_drag(self, event: QEvent) -> bool:
         if self._immersive_active:
             return False
@@ -540,7 +567,6 @@ class FramelessWindowManager(QObject):
         if event.type() == QEvent.Type.MouseButtonPress:
             mouse_event = cast(QMouseEvent, event)
             if mouse_event.button() == Qt.MouseButton.LeftButton:
-                self._drag_active = True
                 cursor_global = mouse_event.globalPosition().toPoint()
                 self._drag_offset = (
                     cursor_global - self._window.frameGeometry().topLeft()
@@ -562,6 +588,14 @@ class FramelessWindowManager(QObject):
                         self._window.resize(pre.size())
 
                 self._snap_helper.begin_drag(self._window.geometry())
+
+                # On Wayland, QWidget.move() is ignored for frameless windows.
+                # Delegate movement to the compositor; no manual drag tracking
+                # is needed in that case.
+                if self._try_start_system_move():
+                    return True
+
+                self._drag_active = True
                 return True
 
         if event.type() == QEvent.Type.MouseMove and self._drag_active:

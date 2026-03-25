@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from PySide6.QtCore import QPoint, QRect, QSize
 
@@ -63,3 +63,106 @@ def test_apply_screen_change_fix_rescales_and_repositions() -> None:
     args, _ = window.move.call_args
     assert args in ((QPoint(20, 20),), (20, 20))
     assert manager._last_screen_dpr == 2.0
+
+
+# ---------------------------------------------------------------------------
+# _try_start_system_move – Wayland drag delegation
+# ---------------------------------------------------------------------------
+
+def _make_manager_with_window(window_handle=None) -> FramelessWindowManager:
+    """Create a bare FramelessWindowManager instance suitable for unit tests."""
+    manager = FramelessWindowManager.__new__(FramelessWindowManager)
+    window = MagicMock()
+    window.windowHandle.return_value = window_handle
+    manager._window = window
+    return manager
+
+
+def test_try_start_system_move_on_wayland_calls_start_system_move() -> None:
+    """startSystemMove() is called when the platform is 'wayland'."""
+    handle = MagicMock()
+    handle.startSystemMove = MagicMock()
+    manager = _make_manager_with_window(handle)
+
+    app = MagicMock()
+    app.platformName.return_value = "wayland"
+
+    with patch("iPhoto.gui.ui.window_manager.QApplication") as mock_app_cls:
+        mock_app_cls.instance.return_value = app
+        result = manager._try_start_system_move()
+
+    assert result is True
+    handle.startSystemMove.assert_called_once()
+
+
+def test_try_start_system_move_on_xcb_returns_false() -> None:
+    """startSystemMove() is NOT called on X11 (xcb platform)."""
+    handle = MagicMock()
+    manager = _make_manager_with_window(handle)
+
+    app = MagicMock()
+    app.platformName.return_value = "xcb"
+
+    with patch("iPhoto.gui.ui.window_manager.QApplication") as mock_app_cls:
+        mock_app_cls.instance.return_value = app
+        result = manager._try_start_system_move()
+
+    assert result is False
+    handle.startSystemMove.assert_not_called()
+
+
+def test_try_start_system_move_on_windows_returns_false() -> None:
+    """startSystemMove() is NOT called on Windows ('windows' platform)."""
+    handle = MagicMock()
+    manager = _make_manager_with_window(handle)
+
+    app = MagicMock()
+    app.platformName.return_value = "windows"
+
+    with patch("iPhoto.gui.ui.window_manager.QApplication") as mock_app_cls:
+        mock_app_cls.instance.return_value = app
+        result = manager._try_start_system_move()
+
+    assert result is False
+    handle.startSystemMove.assert_not_called()
+
+
+def test_try_start_system_move_on_macos_returns_false() -> None:
+    """startSystemMove() is NOT called on macOS ('cocoa' platform)."""
+    handle = MagicMock()
+    manager = _make_manager_with_window(handle)
+
+    app = MagicMock()
+    app.platformName.return_value = "cocoa"
+
+    with patch("iPhoto.gui.ui.window_manager.QApplication") as mock_app_cls:
+        mock_app_cls.instance.return_value = app
+        result = manager._try_start_system_move()
+
+    assert result is False
+    handle.startSystemMove.assert_not_called()
+
+
+def test_try_start_system_move_no_window_handle_returns_false() -> None:
+    """Returns False gracefully when the window has no QWindow handle yet."""
+    manager = _make_manager_with_window(window_handle=None)
+
+    app = MagicMock()
+    app.platformName.return_value = "wayland"
+
+    with patch("iPhoto.gui.ui.window_manager.QApplication") as mock_app_cls:
+        mock_app_cls.instance.return_value = app
+        result = manager._try_start_system_move()
+
+    assert result is False
+
+
+def test_try_start_system_move_no_app_returns_false() -> None:
+    """Returns False gracefully when QApplication has no instance."""
+    manager = _make_manager_with_window()
+
+    with patch("iPhoto.gui.ui.window_manager.QApplication") as mock_app_cls:
+        mock_app_cls.instance.return_value = None
+        result = manager._try_start_system_move()
+
+    assert result is False
