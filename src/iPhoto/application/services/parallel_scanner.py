@@ -37,6 +37,21 @@ LOGGER = logging.getLogger(__name__)
 
 _SUPPORTED_EXTENSIONS: frozenset[str] = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
 
+# P4: C-accelerated directory traversal via POSIX nftw
+try:
+    from iPhoto._native import discover_files_fast as _discover_files_fast  # type: ignore[attr-defined]
+    _DISCOVER_C = True
+    LOGGER.debug(
+        "parallel_scanner: C extension available for file discovery (P4)"
+    )
+except Exception:
+    _discover_files_fast = None  # type: ignore[assignment]
+    _DISCOVER_C = False
+    LOGGER.debug(
+        "parallel_scanner: C extension unavailable for file discovery (P4) "
+        "— using Python fallback"
+    )
+
 
 def _default_max_workers() -> int:
     """Use at most half the CPU cores so the UI thread is never starved."""
@@ -219,7 +234,37 @@ class ParallelScanner:
     # ------------------------------------------------------------------
 
     def _discover_files(self, path: Path) -> Generator[Path, None, None]:
-        """Yield supported media files using a generator to reduce memory."""
+        """Yield supported media files using a generator to reduce memory.
+
+        Uses the C ``nftw``-based implementation (P4) when available for
+        faster traversal and extension filtering.  Falls back to the
+        Python recursive ``os.scandir`` implementation otherwise.
+        """
+        # P4: attempt C-accelerated traversal first
+        if _DISCOVER_C and _discover_files_fast is not None and not self._cancelled.is_set():
+            try:
+                files = _discover_files_fast(path)
+                if files is not None:
+                    LOGGER.debug(
+                        "parallel_scanner._discover_files: C extension (P4) returned %d files",
+                        len(files),
+                    )
+                    yield from files
+                    return
+            except Exception as exc:  # pragma: no cover
+                LOGGER.debug(
+                    "parallel_scanner._discover_files: C extension (P4) failed (%s), "
+                    "falling back to Python",
+                    exc,
+                )
+
+        LOGGER.debug(
+            "parallel_scanner._discover_files: using Python os.scandir fallback"
+        )
+        yield from self._discover_files_py(path)
+
+    def _discover_files_py(self, path: Path) -> Generator[Path, None, None]:
+        """Python recursive os.scandir fallback for file discovery."""
         try:
             for entry in os.scandir(path):
                 if self._cancelled.is_set():
@@ -227,7 +272,7 @@ class ParallelScanner:
                 if entry.is_file(follow_symlinks=False) and self._is_supported(entry.name):
                     yield Path(entry.path)
                 elif entry.is_dir(follow_symlinks=False) and not entry.name.startswith("."):
-                    yield from self._discover_files(Path(entry.path))
+                    yield from self._discover_files_py(Path(entry.path))
         except PermissionError:
             LOGGER.warning("Permission denied: %s", path)
 

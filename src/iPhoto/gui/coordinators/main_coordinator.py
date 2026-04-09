@@ -416,6 +416,9 @@ class MainCoordinator(QObject):
         updates = self._facade.library_updates
         updates.scanProgress.connect(self._status_bar.handle_scan_progress)
         updates.scanFinished.connect(self._status_bar.handle_scan_finished)
+        # scanElapsed is emitted just before scanFinished so the elapsed time is
+        # available when handle_scan_finished composes the completion message.
+        updates.scanElapsed.connect(self._status_bar.handle_scan_elapsed)
         self._facade.scanBatchFailed.connect(self._status_bar.handle_scan_batch_failed)
         self._facade.scanProgress.connect(self._status_bar.handle_scan_progress)
         self._facade.scanFinished.connect(self._status_bar.handle_scan_finished)

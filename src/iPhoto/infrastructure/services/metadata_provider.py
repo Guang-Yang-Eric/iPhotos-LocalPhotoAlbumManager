@@ -13,6 +13,22 @@ from iPhoto.domain.models import MediaType
 
 logger = logging.getLogger(__name__)
 
+# P5: C-accelerated ISO 8601 parsing that also returns year/month in one call,
+# eliminating the double-parse in normalize_metadata.
+try:
+    from iPhoto._native import parse_dt_full_fast as _parse_dt_full_fast  # type: ignore[attr-defined]
+    _PARSE_FULL_C = True
+    logger.debug(
+        "metadata_provider: C extension available for timestamp parsing (P5)"
+    )
+except Exception:
+    _parse_dt_full_fast = None  # type: ignore[assignment]
+    _PARSE_FULL_C = False
+    logger.debug(
+        "metadata_provider: C extension unavailable for timestamp parsing (P5) "
+        "— using Python fallback"
+    )
+
 class ExifToolMetadataProvider(IMetadataProvider):
     _IMAGE_EXTENSIONS = {".heic", ".heif", ".heifs", ".heicf", ".jpg", ".jpeg", ".png", ".webp"}
     _VIDEO_EXTENSIONS = {".mov", ".mp4", ".m4v", ".qt", ".avi", ".mkv"}
@@ -61,25 +77,53 @@ class ExifToolMetadataProvider(IMetadataProvider):
             if value is not None:
                 row[key] = value
 
-        # Fixup 'dt' and 'ts' if metadata has better date
+        # Fixup 'dt'/'ts'/'year'/'month': use parse_dt_full_fast (P5) to parse
+        # the best available dt string once, deriving ts, year, and month in a
+        # single C call instead of calling fromisoformat() twice.
+        dt_str_for_full: str | None = None
         if "dt" in processed_meta and isinstance(processed_meta["dt"], str):
-            try:
-                dt_str = processed_meta["dt"].replace("Z", "+00:00")
-                dt_obj = datetime.fromisoformat(dt_str)
-                row["ts"] = int(dt_obj.timestamp() * 1_000_000)
-            except (ValueError, TypeError):
-                pass
+            dt_str_for_full = processed_meta["dt"]
+        elif "dt" in row and isinstance(row["dt"], str):
+            dt_str_for_full = row["dt"]
 
-        # Calculate year/month
-        if "dt" in row and isinstance(row["dt"], str):
-            try:
-                dt_str = row["dt"].replace("Z", "+00:00")
-                dt_obj = datetime.fromisoformat(dt_str)
-                row["year"] = dt_obj.year
-                row["month"] = dt_obj.month
-            except (ValueError, TypeError):
-                row["year"] = None
-                row["month"] = None
+        if dt_str_for_full is not None:
+            # Normalise the "Z" suffix that Python's fromisoformat requires.
+            dt_str_norm = dt_str_for_full.replace("Z", "+00:00")
+
+            # P5: single-call parse returning (unix_us, year, month)
+            full_result = (
+                _parse_dt_full_fast(dt_str_norm)
+                if _PARSE_FULL_C and _parse_dt_full_fast is not None
+                else None
+            )
+
+            if full_result is not None:
+                unix_us, year, month = full_result
+                if "dt" in processed_meta and isinstance(processed_meta["dt"], str):
+                    row["ts"] = unix_us
+                row["year"] = year
+                row["month"] = month
+            else:
+                # Python fallback — retain original two-parse logic
+                if "dt" in processed_meta and isinstance(processed_meta["dt"], str):
+                    try:
+                        dt_obj = datetime.fromisoformat(dt_str_norm)
+                        row["ts"] = int(dt_obj.timestamp() * 1_000_000)
+                    except (ValueError, TypeError):
+                        pass
+
+                if "dt" in row and isinstance(row["dt"], str):
+                    try:
+                        fallback_dt_str = row["dt"].replace("Z", "+00:00")
+                        fallback_dt_obj = datetime.fromisoformat(fallback_dt_str)
+                        row["year"] = fallback_dt_obj.year
+                        row["month"] = fallback_dt_obj.month
+                    except (ValueError, TypeError):
+                        row["year"] = None
+                        row["month"] = None
+        else:
+            row["year"] = None
+            row["month"] = None
 
         # Aspect Ratio
         w = row.get("w")

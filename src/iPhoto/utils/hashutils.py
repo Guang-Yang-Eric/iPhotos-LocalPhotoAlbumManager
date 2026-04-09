@@ -7,6 +7,11 @@ import os
 
 import xxhash
 
+try:
+    from iPhoto._native import compute_file_id_fast as _compute_file_id_fast
+except Exception:
+    _compute_file_id_fast = None  # type: ignore[assignment]
+
 
 def file_xxh3(path: Path, *, chunk_size: int = 1024 * 1024) -> str:
     """Return the XXH3 128-bit hash of *path*."""
@@ -26,7 +31,16 @@ def compute_file_id(path: Path) -> str:
     Return a hash of the file content, optimized for speed.
     For small files (< 2MB), hashes the entire content using XXH3.
     For large files, hashes a sample of the content (Head/Mid/Tail) + Size.
+
+    Uses a C extension (mmap + xxhash) when available for best performance.
+    Falls back to pure Python when the C extension is unavailable.
     """
+    if _compute_file_id_fast is not None:
+        result = _compute_file_id_fast(path)
+        if result is not None:
+            return result
+        # Fall through to Python implementation on C-side I/O error
+
     threshold = 2 * 1024 * 1024  # 2 MB
 
     with path.open("rb") as f:

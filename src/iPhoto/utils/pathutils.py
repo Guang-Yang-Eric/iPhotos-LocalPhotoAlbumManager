@@ -9,6 +9,11 @@ import re
 from pathlib import Path
 from typing import Iterable, Iterator, Optional, Tuple
 
+try:
+    from iPhoto._native import should_include_fast as _should_include_fast
+except Exception:
+    _should_include_fast = None  # type: ignore[assignment]
+
 
 def _expand(pattern: str) -> Iterator[str]:
     match = re.search(r"\{([^{}]*,[^{}]*)\}", pattern)
@@ -51,15 +56,27 @@ def is_excluded(path: Path, globs: Iterable[str], *, root: Path) -> bool:
 def should_include(path: Path, include_globs: Iterable[str], exclude_globs: Iterable[str], *, root: Path) -> bool:
     """Return ``True`` if *path* should be scanned."""
 
-    if is_excluded(path, exclude_globs, root=root):
-        return False
     rel = path.relative_to(root).as_posix()
+    expanded_inc: list[str] = []
     for pattern in include_globs:
-        for expanded in _expand_cached(pattern):
-            if fnmatch.fnmatch(rel, expanded):
-                return True
-            if expanded.startswith("**/") and fnmatch.fnmatch(rel, expanded[3:]):
-                return True
+        expanded_inc.extend(_expand_cached(pattern))
+    expanded_exc: list[str] = []
+    for pattern in exclude_globs:
+        expanded_exc.extend(_expand_cached(pattern))
+
+    if _should_include_fast is not None:
+        return _should_include_fast(rel, expanded_inc, expanded_exc)
+
+    for expanded in expanded_exc:
+        if fnmatch.fnmatch(rel, expanded):
+            return False
+        if expanded.startswith("**/") and fnmatch.fnmatch(rel, expanded[3:]):
+            return False
+    for expanded in expanded_inc:
+        if fnmatch.fnmatch(rel, expanded):
+            return True
+        if expanded.startswith("**/") and fnmatch.fnmatch(rel, expanded[3:]):
+            return True
     return False
 
 

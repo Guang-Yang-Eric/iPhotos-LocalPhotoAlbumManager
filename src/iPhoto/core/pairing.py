@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -12,6 +13,26 @@ from dateutil import parser
 from ..config import LIVE_DURATION_PREFERRED, PAIR_TIME_DELTA_SEC
 from ..models.types import LiveGroup
 
+_logger = logging.getLogger(__name__)
+
+try:
+    from .._native import parse_dt_fast as _parse_dt_fast
+except Exception:
+    _parse_dt_fast = None  # type: ignore[assignment]
+
+# P6: C-accelerated content-ID normalisation (strip + casefold)
+try:
+    from .._native import normalise_content_id_fast as _normalise_content_id_fast  # type: ignore[attr-defined]
+    _NORMALISE_C = True
+    _logger.debug("pairing: C extension available for content-ID normalisation (P6)")
+except Exception:
+    _normalise_content_id_fast = None  # type: ignore[assignment]
+    _NORMALISE_C = False
+    _logger.debug(
+        "pairing: C extension unavailable for content-ID normalisation (P6) "
+        "— using Python fallback"
+    )
+
 
 def _parse_dt(value: str | None) -> datetime | None:
     if not value:
@@ -20,6 +41,23 @@ def _parse_dt(value: str | None) -> datetime | None:
         return parser.isoparse(value)
     except (ValueError, TypeError):
         return None
+
+
+def _parse_dt_us(value: str | None) -> int | None:
+    """Return Unix microsecond timestamp for *value*, or ``None`` on failure.
+
+    Uses the C-accelerated parser when available, otherwise falls back to
+    :func:`_parse_dt` via the dateutil library.
+    """
+    if not value:
+        return None
+    if _parse_dt_fast is not None:
+        return _parse_dt_fast(value)
+    dt = _parse_dt(value)
+    if dt is None:
+        return None
+    import math
+    return math.floor(dt.timestamp() * 1_000_000)
 
 
 _IMAGE_EXTENSIONS = {
@@ -68,10 +106,17 @@ def _is_video(row: Dict[str, object]) -> bool:
 
 
 def _normalise_content_id(value: object) -> str | None:
-    """Return a stable comparison key for Live Photo content identifiers."""
+    """Return a stable comparison key for Live Photo content identifiers.
 
+    Uses the C-accelerated implementation (P6) when available, falling back
+    to Python ``str.strip()`` + ``str.casefold()``.
+    """
     if not isinstance(value, str):
         return None
+
+    if _NORMALISE_C and _normalise_content_id_fast is not None:
+        return _normalise_content_id_fast(value)
+
     trimmed = value.strip()
     if not trimmed:
         return None
@@ -146,15 +191,15 @@ def _match_by_time(
     candidates: Iterable[Dict[str, object]],
     used_videos: set[str],
 ) -> Dict[str, object] | None:
-    photo_dt = _parse_dt(photo.get("dt"))
+    photo_us = _parse_dt_us(photo.get("dt"))
     best: Tuple[float, Dict[str, object]] | None = None
     for candidate in candidates:
         if candidate["rel"] in used_videos:
             continue
-        video_dt = _parse_dt(candidate.get("dt"))
-        if not photo_dt or not video_dt:
+        video_us = _parse_dt_us(candidate.get("dt"))
+        if photo_us is None or video_us is None:
             continue
-        delta = abs((photo_dt - video_dt).total_seconds())
+        delta = abs(photo_us - video_us) / 1_000_000.0
         if delta > PAIR_TIME_DELTA_SEC:
             continue
         if best is None or delta < best[0]:

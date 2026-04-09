@@ -38,6 +38,10 @@ class StatusBarController(QObject):
         # can use "Restore" focused language.
         self._move_context_restore: bool = False
         self._context = context
+        # Elapsed seconds of the most recently completed async scan.  Set by
+        # :meth:`handle_scan_elapsed` (fired just before :meth:`handle_scan_finished`)
+        # and consumed once by :meth:`handle_scan_finished`.
+        self._last_scan_elapsed_s: Optional[float] = None
 
     # Generic helpers -------------------------------------------------
     def show_message(self, message: str, timeout_ms: int | None = None) -> None:
@@ -59,6 +63,16 @@ class StatusBarController(QObject):
         if self._rescan_action is not None:
             self._rescan_action.setEnabled(False)
         self.show_message("Starting scan…")
+
+    def handle_scan_elapsed(self, _root: Path, elapsed_s: float) -> None:
+        """Store the elapsed seconds reported by the most recent async scan.
+
+        This slot is connected to :attr:`LibraryUpdateService.scanElapsed` and
+        is always fired *before* :meth:`handle_scan_finished` for the same scan
+        so that the elapsed value is available when the completion message is
+        composed.
+        """
+        self._last_scan_elapsed_s = elapsed_s
 
     # Facade callbacks ------------------------------------------------
     def handle_scan_progress(self, root: Path, current: int, total: int) -> None:
@@ -98,7 +112,17 @@ class StatusBarController(QObject):
             self._progress_context = None
         if self._rescan_action is not None:
             self._rescan_action.setEnabled(True)
-        message = "Scan complete." if success else "Scan failed."
+        if success:
+            elapsed = self._last_scan_elapsed_s
+            if elapsed is not None:
+                message = f"Scan complete. ({elapsed:.1f}s)"
+            else:
+                message = "Scan complete."
+        else:
+            message = "Scan failed."
+        # Consume the stored elapsed value so a subsequent facade-relayed
+        # scanFinished (which has no paired scanElapsed) shows plain text.
+        self._last_scan_elapsed_s = None
         self.show_message(message, 5000)
 
     def handle_scan_batch_failed(self, _root: Path, count: int) -> None:
