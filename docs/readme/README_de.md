@@ -71,11 +71,13 @@ iphoto-gui /fotos/LondonReise
 
 ## 🌟 Star-Verlauf
 
-<p align="center">
-  <a href="https://www.star-history.com/#OliverZhaohaibin/iPhotron-LocalPhotoAlbumManager&type=date&legend=bottom-right">
-    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=OliverZhaohaibin/iPhotron-LocalPhotoAlbumManager&type=date&legend=bottom-right" />
-  </a>
-</p>
+<a href="https://www.star-history.com/?type=date&legend=bottom-right&repos=OliverZhaohaibin%2FiPhotron-LocalPhotoAlbumManager">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=OliverZhaohaibin/iPhotron-LocalPhotoAlbumManager&type=date&theme=dark&legend=bottom-right" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=OliverZhaohaibin/iPhotron-LocalPhotoAlbumManager&type=date&legend=bottom-right" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=OliverZhaohaibin/iPhotron-LocalPhotoAlbumManager&type=date&legend=bottom-right" />
+ </picture>
+</a>
 
 ## 🚀 Product Hunt
 <p align="center">
