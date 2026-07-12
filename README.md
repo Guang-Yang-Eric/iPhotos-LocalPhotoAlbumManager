@@ -71,11 +71,11 @@ iphoto-gui /photos/LondonTrip
 
 ## 🌟 Star History
 
-<a href="https://www.star-history.com/?type=date&legend=bottom-right&repos=OliverZhaohaibin%2FiPhotron-LocalPhotoAlbumManager">
+<a href="https://www.star-history.com/?repos=OliverZhaohaibin%2FiPhotron-LocalPhotoAlbumManager&type=date&legend=bottom-right">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=OliverZhaohaibin/iPhotron-LocalPhotoAlbumManager&type=date&theme=dark&legend=bottom-right" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=OliverZhaohaibin/iPhotron-LocalPhotoAlbumManager&type=date&legend=bottom-right" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=OliverZhaohaibin/iPhotron-LocalPhotoAlbumManager&type=date&legend=bottom-right" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=OliverZhaohaibin/iPhotron-LocalPhotoAlbumManager&type=date&theme=dark&legend=bottom-right&sealed_token=Lc1mEAZl71QksVWnIyQYzFqd7tdPL2k1R9gQrEO-qQNiQMfrYgwsdrFiWvaChH3Iuyimi_hZTg0bbigPlPFx8N09refu-FvmiY1Gg64fn7pD4mcLmFLZyw" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=OliverZhaohaibin/iPhotron-LocalPhotoAlbumManager&type=date&legend=bottom-right&sealed_token=Lc1mEAZl71QksVWnIyQYzFqd7tdPL2k1R9gQrEO-qQNiQMfrYgwsdrFiWvaChH3Iuyimi_hZTg0bbigPlPFx8N09refu-FvmiY1Gg64fn7pD4mcLmFLZyw" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=OliverZhaohaibin/iPhotron-LocalPhotoAlbumManager&type=date&legend=bottom-right&sealed_token=Lc1mEAZl71QksVWnIyQYzFqd7tdPL2k1R9gQrEO-qQNiQMfrYgwsdrFiWvaChH3Iuyimi_hZTg0bbigPlPFx8N09refu-FvmiY1Gg64fn7pD4mcLmFLZyw" />
  </picture>
 </a>
 
