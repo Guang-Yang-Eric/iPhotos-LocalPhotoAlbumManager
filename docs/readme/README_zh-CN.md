@@ -70,7 +70,13 @@ iphoto-gui /photos/LondonTrip
 
 ## 🌟 Star 历史
 
-[![Star History Chart](https://api.star-history.com/chart?repos=OliverZhaohaibin/iPhotron-LocalPhotoAlbumManager&type=date&legend=bottom-right)](https://www.star-history.com/?repos=OliverZhaohaibin%2FiPhotron-LocalPhotoAlbumManager&type=date&legend=bottom-right)
+<a href="https://www.star-history.com/?repos=OliverZhaohaibin%2FiPhotron-LocalPhotoAlbumManager&type=date&legend=bottom-right">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=OliverZhaohaibin/iPhotron-LocalPhotoAlbumManager&type=date&theme=dark&legend=bottom-right&sealed_token=JFO3TPoON_ld3Ms1pBcDWvRbpyiPHDKcjFPPdCW1JQ4yyYMQCcqjJUGa_BQ0uRdJyS0qdkRWCKSeKAsTvibJ7hfhlplZhd8berJrzF66Mi_H_bvE6x77wVzLksMW9gvzWFeJUjR5rg_RKuVHVrKrT2HxK3KBa-d1KZrVNncQ3Tjnr2OsNn_163j7ngc_" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=OliverZhaohaibin/iPhotron-LocalPhotoAlbumManager&type=date&legend=bottom-right&sealed_token=JFO3TPoON_ld3Ms1pBcDWvRbpyiPHDKcjFPPdCW1JQ4yyYMQCcqjJUGa_BQ0uRdJyS0qdkRWCKSeKAsTvibJ7hfhlplZhd8berJrzF66Mi_H_bvE6x77wVzLksMW9gvzWFeJUjR5rg_RKuVHVrKrT2HxK3KBa-d1KZrVNncQ3Tjnr2OsNn_163j7ngc_" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=OliverZhaohaibin/iPhotron-LocalPhotoAlbumManager&type=date&legend=bottom-right&sealed_token=JFO3TPoON_ld3Ms1pBcDWvRbpyiPHDKcjFPPdCW1JQ4yyYMQCcqjJUGa_BQ0uRdJyS0qdkRWCKSeKAsTvibJ7hfhlplZhd8berJrzF66Mi_H_bvE6x77wVzLksMW9gvzWFeJUjR5rg_RKuVHVrKrT2HxK3KBa-d1KZrVNncQ3Tjnr2OsNn_163j7ngc_" />
+ </picture>
+</a>
 
 ## 🚀 Product Hunt
 <p align="center">
